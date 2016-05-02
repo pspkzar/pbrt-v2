@@ -9,17 +9,27 @@
 #include "renderer.h"
 
 class BPTRenderer : public Renderer{
-	BPTRenderer(int samplesPerPixel, int maxDepth, Camera *camera);
-	~BPTRenderer();
-	virtual void Render(const Scene *scene);
+public:
+	BPTRenderer(int samplesPerPixel, int maxDepth, Camera *camera){
+		this->camera=camera;
+		this->samplesPerPixel=samplesPerPixel;
+		this->maxDepth=maxDepth;
+	}
+
+	~BPTRenderer(){
+
+	};
+
+	void Render(const Scene *scene);
+
 	Spectrum Li(const Scene *scene, const RayDifferential &ray,
         const Sample *sample, RNG &rng, MemoryArena &arena,
         Intersection *isect = NULL, Spectrum *T = NULL) const;
+
     Spectrum Transmittance(const Scene *scene,
         const RayDifferential &ray, const Sample *sample,
         RNG &rng, MemoryArena &arena) const;
 
-protected:
 	int maxDepth, samplesPerPixel;
 	Camera *camera;
 };

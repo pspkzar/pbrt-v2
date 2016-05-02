@@ -8,8 +8,8 @@
 
 #define FLEX_SCANNER
 #define YY_FLEX_MAJOR_VERSION 2
-#define YY_FLEX_MINOR_VERSION 5
-#define YY_FLEX_SUBMINOR_VERSION 35
+#define YY_FLEX_MINOR_VERSION 6
+#define YY_FLEX_SUBMINOR_VERSION 0
 #if YY_FLEX_SUBMINOR_VERSION > 0
 #define FLEX_BETA
 #endif
@@ -54,7 +54,6 @@ typedef int flex_int32_t;
 typedef unsigned char flex_uint8_t; 
 typedef unsigned short int flex_uint16_t;
 typedef unsigned int flex_uint32_t;
-#endif /* ! C99 */
 
 /* Limits of integral types. */
 #ifndef INT8_MIN
@@ -84,6 +83,8 @@ typedef unsigned int flex_uint32_t;
 #ifndef UINT32_MAX
 #define UINT32_MAX             (4294967295U)
 #endif
+
+#endif /* ! C99 */
 
 #endif /* ! FLEXINT_H */
 
@@ -141,7 +142,15 @@ typedef unsigned int flex_uint32_t;
 
 /* Size of default input buffer. */
 #ifndef YY_BUF_SIZE
+#ifdef __ia64__
+/* On IA-64, the buffer size is 16k, not 8k.
+ * Moreover, YY_BUF_SIZE is 2*YY_READ_BUF_SIZE in the general case.
+ * Ditto for the __ia64__ case accordingly.
+ */
+#define YY_BUF_SIZE 32768
+#else
 #define YY_BUF_SIZE 16384
+#endif /* __ia64__ */
 #endif
 
 /* The state buf must be large enough to hold one state per character in the main buffer.
@@ -167,6 +176,7 @@ extern FILE *yyin, *yyout;
 #define EOB_ACT_LAST_MATCH 2
 
     #define YY_LESS_LINENO(n)
+    #define YY_LINENO_REWIND_TO(ptr)
     
 /* Return all but the first "n" matched characters back to the input stream. */
 #define yyless(n) \
@@ -343,11 +353,17 @@ extern int yylineno;
 int yylineno = 1;
 
 extern char *yytext;
+#ifdef yytext_ptr
+#undef yytext_ptr
+#endif
 #define yytext_ptr yytext
 
 static yy_state_type yy_get_previous_state (void );
 static yy_state_type yy_try_NUL_trans (yy_state_type current_state  );
 static int yy_get_next_buffer (void );
+#if defined(__GNUC__) && __GNUC__ >= 3
+__attribute__((__noreturn__))
+#endif
 static void yy_fatal_error (yyconst char msg[]  );
 
 /* Done after the current pattern has been matched and before the
@@ -417,7 +433,7 @@ static yyconst flex_int16_t yy_accept[394] =
 
     } ;
 
-static yyconst flex_int32_t yy_ec[256] =
+static yyconst YY_CHAR yy_ec[256] =
     {   0,
         1,    1,    1,    1,    1,    1,    1,    1,    2,    3,
         1,    1,    2,    1,    1,    1,    1,    1,    1,    1,
@@ -449,7 +465,7 @@ static yyconst flex_int32_t yy_ec[256] =
         1,    1,    1,    1,    1
     } ;
 
-static yyconst flex_int32_t yy_meta[52] =
+static yyconst YY_CHAR yy_meta[52] =
     {   0,
         1,    1,    1,    1,    1,    1,    1,    2,    2,    2,
         2,    2,    2,    2,    2,    2,    2,    2,    2,    2,
@@ -459,7 +475,7 @@ static yyconst flex_int32_t yy_meta[52] =
         2
     } ;
 
-static yyconst flex_int16_t yy_base[399] =
+static yyconst flex_uint16_t yy_base[399] =
     {   0,
         0,    0,   49,   51,  430,  429,    0,    0,    0,    0,
       431,  434,  428,  434,  434,  434,   49,  421,   51,   30,
@@ -555,7 +571,7 @@ static yyconst flex_int16_t yy_def[399] =
 
     } ;
 
-static yyconst flex_int16_t yy_nxt[486] =
+static yyconst flex_uint16_t yy_nxt[486] =
     {   0,
        12,   13,   14,   15,   16,   17,   18,   19,   20,   21,
        22,   21,   23,   24,   25,   26,   27,   28,   29,   30,
@@ -685,7 +701,7 @@ int yy_flex_debug = 0;
 char *yytext;
 #line 1 "core/pbrtlex.ll"
 /*
-    pbrt source code Copyright(c) 1998-2010 Matt Pharr and Greg Humphreys.
+    pbrt source code Copyright(c) 1998-2012 Matt Pharr and Greg Humphreys.
 
     This file is part of pbrt.
 
@@ -714,7 +730,7 @@ char *yytext;
 
  */
 /* state used for include file stuff */
-#line 26 "core/pbrtlex.ll"
+#line 34 "core/pbrtlex.ll"
 
 #define YY_MAIN 0
 #define YY_NEVER_INTERACTIVE 1
@@ -752,22 +768,30 @@ void add_string_char(char c) {
 
 
 void include_push(char *filename) {
-    if (includeStack.size() > 32)
-        Severe("Only 32 levels of nested Include allowed in scene files.");
-    IncludeInfo ii;
-    extern string current_file;
-    ii.filename = current_file;
-    ii.bufState = YY_CURRENT_BUFFER;
-    ii.lineNum = line_num;
-    includeStack.push_back(ii);
+    if (includeStack.size() > 32) {
+        Error("Only 32 levels of nested Include allowed in scene files.");
+        exit(1);
+    }
 
-    current_file = AbsolutePath(ResolveFilename(filename));
-    line_num = 1;
+    string new_file = AbsolutePath(ResolveFilename(filename));
 
-    yyin = fopen(current_file.c_str(), "r");
-    if (!yyin)
-        Severe("Unable to open included scene file \"%s\"", current_file.c_str());
-    yy_switch_to_buffer(yy_create_buffer(yyin,YY_BUF_SIZE));
+    FILE *f = fopen(new_file.c_str(), "r");
+    if (!f)
+        Error("Unable to open included scene file \"%s\"", new_file.c_str());
+    else {
+        extern string current_file;
+        IncludeInfo ii;
+        ii.filename = current_file;
+        ii.bufState = YY_CURRENT_BUFFER;
+        ii.lineNum = line_num;
+        includeStack.push_back(ii);
+
+        yyin = f;
+        current_file = new_file;
+        line_num = 1;
+
+        yy_switch_to_buffer(yy_create_buffer(yyin,YY_BUF_SIZE));
+    }
 }
 
 
@@ -785,7 +809,7 @@ void include_pop() {
 
 
 
-#line 781 "core/pbrtlex.cpp"
+#line 813 "core/pbrtlex.cpp"
 
 #define INITIAL 0
 #define STR 1
@@ -822,11 +846,11 @@ void yyset_extra (YY_EXTRA_TYPE user_defined  );
 
 FILE *yyget_in (void );
 
-void yyset_in  (FILE * in_str  );
+void yyset_in  (FILE * _in_str  );
 
 FILE *yyget_out (void );
 
-void yyset_out  (FILE * out_str  );
+void yyset_out  (FILE * _out_str  );
 
 yy_size_t yyget_leng (void );
 
@@ -834,7 +858,7 @@ char *yyget_text (void );
 
 int yyget_lineno (void );
 
-void yyset_lineno (int line_number  );
+void yyset_lineno (int _line_number  );
 
 /* Macros after this point can all be overridden by user definitions in
  * section 1.
@@ -846,6 +870,10 @@ extern "C" int yywrap (void );
 #else
 extern int yywrap (void );
 #endif
+#endif
+
+#ifndef YY_NO_UNPUT
+    
 #endif
 
 #ifndef yytext_ptr
@@ -868,7 +896,12 @@ static int input (void );
 
 /* Amount of stuff to slurp up with each read. */
 #ifndef YY_READ_BUF_SIZE
+#ifdef __ia64__
+/* On IA-64, the buffer size is 16k, not 8k */
+#define YY_READ_BUF_SIZE 16384
+#else
 #define YY_READ_BUF_SIZE 8192
+#endif /* __ia64__ */
 #endif
 
 /* Copy whatever the last rule matched to the standard output. */
@@ -876,7 +909,7 @@ static int input (void );
 /* This used to be an fputs(), but since the string might contain NUL's,
  * we now use fwrite().
  */
-#define ECHO fwrite( yytext, yyleng, 1, yyout )
+#define ECHO do { if (fwrite( yytext, yyleng, 1, yyout )) {} } while (0)
 #endif
 
 /* Gets input and stuffs it into "buf".  number of characters read, or YY_NULL,
@@ -887,7 +920,7 @@ static int input (void );
 	if ( YY_CURRENT_BUFFER_LVALUE->yy_is_interactive ) \
 		{ \
 		int c = '*'; \
-		yy_size_t n; \
+		size_t n; \
 		for ( n = 0; n < max_size && \
 			     (c = getc( yyin )) != EOF && c != '\n'; ++n ) \
 			buf[n] = (char) c; \
@@ -955,7 +988,7 @@ extern int yylex (void);
 
 /* Code executed at the end of each rule. */
 #ifndef YY_BREAK
-#define YY_BREAK break;
+#define YY_BREAK /*LINTED*/break;
 #endif
 
 #define YY_RULE_SETUP \
@@ -965,15 +998,10 @@ extern int yylex (void);
  */
 YY_DECL
 {
-	register yy_state_type yy_current_state;
-	register char *yy_cp, *yy_bp;
-	register int yy_act;
+	yy_state_type yy_current_state;
+	char *yy_cp, *yy_bp;
+	int yy_act;
     
-#line 101 "core/pbrtlex.ll"
-
-
-#line 968 "core/pbrtlex.cpp"
-
 	if ( !(yy_init) )
 		{
 		(yy_init) = 1;
@@ -1000,7 +1028,13 @@ YY_DECL
 		yy_load_buffer_state( );
 		}
 
-	while ( 1 )		/* loops until end-of-file is reached */
+	{
+#line 117 "core/pbrtlex.ll"
+
+
+#line 1036 "core/pbrtlex.cpp"
+
+	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
 		yy_cp = (yy_c_buf_p);
 
@@ -1016,7 +1050,7 @@ YY_DECL
 yy_match:
 		do
 			{
-			register YY_CHAR yy_c = yy_ec[YY_SC_TO_UI(*yy_cp)];
+			YY_CHAR yy_c = yy_ec[YY_SC_TO_UI(*yy_cp)] ;
 			if ( yy_accept[yy_current_state] )
 				{
 				(yy_last_accepting_state) = yy_current_state;
@@ -1057,239 +1091,239 @@ do_action:	/* This label is used only to access EOF actions. */
 
 case 1:
 YY_RULE_SETUP
-#line 103 "core/pbrtlex.ll"
+#line 119 "core/pbrtlex.ll"
 { BEGIN COMMENT; }
 	YY_BREAK
 case 2:
 YY_RULE_SETUP
-#line 104 "core/pbrtlex.ll"
+#line 120 "core/pbrtlex.ll"
 /* eat it up */
 	YY_BREAK
 case 3:
 /* rule 3 can match eol */
 YY_RULE_SETUP
-#line 105 "core/pbrtlex.ll"
+#line 121 "core/pbrtlex.ll"
 { line_num++; BEGIN INITIAL; }
 	YY_BREAK
 case 4:
 YY_RULE_SETUP
-#line 106 "core/pbrtlex.ll"
+#line 122 "core/pbrtlex.ll"
 { return ACCELERATOR; }
 	YY_BREAK
 case 5:
 YY_RULE_SETUP
-#line 107 "core/pbrtlex.ll"
+#line 123 "core/pbrtlex.ll"
 { return ACTIVETRANSFORM; }
 	YY_BREAK
 case 6:
 YY_RULE_SETUP
-#line 108 "core/pbrtlex.ll"
+#line 124 "core/pbrtlex.ll"
 { return ALL; }
 	YY_BREAK
 case 7:
 YY_RULE_SETUP
-#line 109 "core/pbrtlex.ll"
+#line 125 "core/pbrtlex.ll"
 { return AREALIGHTSOURCE; }
 	YY_BREAK
 case 8:
 YY_RULE_SETUP
-#line 110 "core/pbrtlex.ll"
+#line 126 "core/pbrtlex.ll"
 { return ATTRIBUTEBEGIN; }
 	YY_BREAK
 case 9:
 YY_RULE_SETUP
-#line 111 "core/pbrtlex.ll"
+#line 127 "core/pbrtlex.ll"
 { return ATTRIBUTEEND; }
 	YY_BREAK
 case 10:
 YY_RULE_SETUP
-#line 112 "core/pbrtlex.ll"
+#line 128 "core/pbrtlex.ll"
 { return CAMERA; }
 	YY_BREAK
 case 11:
 YY_RULE_SETUP
-#line 113 "core/pbrtlex.ll"
+#line 129 "core/pbrtlex.ll"
 { return CONCATTRANSFORM; }
 	YY_BREAK
 case 12:
 YY_RULE_SETUP
-#line 114 "core/pbrtlex.ll"
+#line 130 "core/pbrtlex.ll"
 { return COORDINATESYSTEM; }
 	YY_BREAK
 case 13:
 YY_RULE_SETUP
-#line 115 "core/pbrtlex.ll"
+#line 131 "core/pbrtlex.ll"
 { return COORDSYSTRANSFORM; }
 	YY_BREAK
 case 14:
 YY_RULE_SETUP
-#line 116 "core/pbrtlex.ll"
+#line 132 "core/pbrtlex.ll"
 { return ENDTIME; }
 	YY_BREAK
 case 15:
 YY_RULE_SETUP
-#line 117 "core/pbrtlex.ll"
+#line 133 "core/pbrtlex.ll"
 { return FILM; }
 	YY_BREAK
 case 16:
 YY_RULE_SETUP
-#line 118 "core/pbrtlex.ll"
+#line 134 "core/pbrtlex.ll"
 { return IDENTITY; }
 	YY_BREAK
 case 17:
 YY_RULE_SETUP
-#line 119 "core/pbrtlex.ll"
+#line 135 "core/pbrtlex.ll"
 { return INCLUDE; }
 	YY_BREAK
 case 18:
 YY_RULE_SETUP
-#line 120 "core/pbrtlex.ll"
+#line 136 "core/pbrtlex.ll"
 { return LIGHTSOURCE; }
 	YY_BREAK
 case 19:
 YY_RULE_SETUP
-#line 121 "core/pbrtlex.ll"
+#line 137 "core/pbrtlex.ll"
 { return LOOKAT; }
 	YY_BREAK
 case 20:
 YY_RULE_SETUP
-#line 122 "core/pbrtlex.ll"
+#line 138 "core/pbrtlex.ll"
 { return MAKENAMEDMATERIAL; }
 	YY_BREAK
 case 21:
 YY_RULE_SETUP
-#line 123 "core/pbrtlex.ll"
+#line 139 "core/pbrtlex.ll"
 { return MATERIAL; }
 	YY_BREAK
 case 22:
 YY_RULE_SETUP
-#line 124 "core/pbrtlex.ll"
+#line 140 "core/pbrtlex.ll"
 { return NAMEDMATERIAL; }
 	YY_BREAK
 case 23:
 YY_RULE_SETUP
-#line 125 "core/pbrtlex.ll"
+#line 141 "core/pbrtlex.ll"
 { return OBJECTBEGIN; }
 	YY_BREAK
 case 24:
 YY_RULE_SETUP
-#line 126 "core/pbrtlex.ll"
+#line 142 "core/pbrtlex.ll"
 { return OBJECTEND; }
 	YY_BREAK
 case 25:
 YY_RULE_SETUP
-#line 127 "core/pbrtlex.ll"
+#line 143 "core/pbrtlex.ll"
 { return OBJECTINSTANCE; }
 	YY_BREAK
 case 26:
 YY_RULE_SETUP
-#line 128 "core/pbrtlex.ll"
+#line 144 "core/pbrtlex.ll"
 { return PIXELFILTER; }
 	YY_BREAK
 case 27:
 YY_RULE_SETUP
-#line 129 "core/pbrtlex.ll"
+#line 145 "core/pbrtlex.ll"
 { return RENDERER; }
 	YY_BREAK
 case 28:
 YY_RULE_SETUP
-#line 130 "core/pbrtlex.ll"
+#line 146 "core/pbrtlex.ll"
 { return REVERSEORIENTATION; }
 	YY_BREAK
 case 29:
 YY_RULE_SETUP
-#line 131 "core/pbrtlex.ll"
+#line 147 "core/pbrtlex.ll"
 { return ROTATE; }
 	YY_BREAK
 case 30:
 YY_RULE_SETUP
-#line 132 "core/pbrtlex.ll"
+#line 148 "core/pbrtlex.ll"
 { return SAMPLER; }
 	YY_BREAK
 case 31:
 YY_RULE_SETUP
-#line 133 "core/pbrtlex.ll"
+#line 149 "core/pbrtlex.ll"
 { return SCALE; }
 	YY_BREAK
 case 32:
 YY_RULE_SETUP
-#line 134 "core/pbrtlex.ll"
+#line 150 "core/pbrtlex.ll"
 { return SHAPE; }
 	YY_BREAK
 case 33:
 YY_RULE_SETUP
-#line 135 "core/pbrtlex.ll"
+#line 151 "core/pbrtlex.ll"
 { return STARTTIME; }
 	YY_BREAK
 case 34:
 YY_RULE_SETUP
-#line 136 "core/pbrtlex.ll"
+#line 152 "core/pbrtlex.ll"
 { return SURFACEINTEGRATOR; }
 	YY_BREAK
 case 35:
 YY_RULE_SETUP
-#line 137 "core/pbrtlex.ll"
+#line 153 "core/pbrtlex.ll"
 { return TEXTURE; }
 	YY_BREAK
 case 36:
 YY_RULE_SETUP
-#line 138 "core/pbrtlex.ll"
+#line 154 "core/pbrtlex.ll"
 { return TRANSFORMBEGIN; }
 	YY_BREAK
 case 37:
 YY_RULE_SETUP
-#line 139 "core/pbrtlex.ll"
+#line 155 "core/pbrtlex.ll"
 { return TRANSFORMEND; }
 	YY_BREAK
 case 38:
 YY_RULE_SETUP
-#line 140 "core/pbrtlex.ll"
+#line 156 "core/pbrtlex.ll"
 { return TRANSFORMTIMES; }
 	YY_BREAK
 case 39:
 YY_RULE_SETUP
-#line 141 "core/pbrtlex.ll"
+#line 157 "core/pbrtlex.ll"
 { return TRANSFORM; }
 	YY_BREAK
 case 40:
 YY_RULE_SETUP
-#line 142 "core/pbrtlex.ll"
+#line 158 "core/pbrtlex.ll"
 { return TRANSLATE; }
 	YY_BREAK
 case 41:
 YY_RULE_SETUP
-#line 143 "core/pbrtlex.ll"
+#line 159 "core/pbrtlex.ll"
 { return VOLUME; }
 	YY_BREAK
 case 42:
 YY_RULE_SETUP
-#line 144 "core/pbrtlex.ll"
+#line 160 "core/pbrtlex.ll"
 { return VOLUMEINTEGRATOR; }
 	YY_BREAK
 case 43:
 YY_RULE_SETUP
-#line 145 "core/pbrtlex.ll"
+#line 161 "core/pbrtlex.ll"
 { return WORLDBEGIN; }
 	YY_BREAK
 case 44:
 YY_RULE_SETUP
-#line 146 "core/pbrtlex.ll"
+#line 162 "core/pbrtlex.ll"
 { return WORLDEND; }
 	YY_BREAK
 case 45:
 YY_RULE_SETUP
-#line 147 "core/pbrtlex.ll"
+#line 163 "core/pbrtlex.ll"
 /* do nothing */
 	YY_BREAK
 case 46:
 /* rule 46 can match eol */
 YY_RULE_SETUP
-#line 148 "core/pbrtlex.ll"
+#line 164 "core/pbrtlex.ll"
 { line_num++; }
 	YY_BREAK
 case 47:
 YY_RULE_SETUP
-#line 149 "core/pbrtlex.ll"
+#line 165 "core/pbrtlex.ll"
 {
     yylval.num = (float) atof(yytext);
     return NUM;
@@ -1297,7 +1331,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 48:
 YY_RULE_SETUP
-#line 155 "core/pbrtlex.ll"
+#line 171 "core/pbrtlex.ll"
 {
     strcpy(yylval.string, yytext);
     return ID;
@@ -1305,57 +1339,57 @@ YY_RULE_SETUP
 	YY_BREAK
 case 49:
 YY_RULE_SETUP
-#line 161 "core/pbrtlex.ll"
+#line 177 "core/pbrtlex.ll"
 { return LBRACK; }
 	YY_BREAK
 case 50:
 YY_RULE_SETUP
-#line 162 "core/pbrtlex.ll"
+#line 178 "core/pbrtlex.ll"
 { return RBRACK; }
 	YY_BREAK
 case 51:
 YY_RULE_SETUP
-#line 163 "core/pbrtlex.ll"
+#line 179 "core/pbrtlex.ll"
 { BEGIN STR; str_pos = 0; }
 	YY_BREAK
 case 52:
 YY_RULE_SETUP
-#line 164 "core/pbrtlex.ll"
+#line 180 "core/pbrtlex.ll"
 {add_string_char('\n');}
 	YY_BREAK
 case 53:
 YY_RULE_SETUP
-#line 165 "core/pbrtlex.ll"
+#line 181 "core/pbrtlex.ll"
 {add_string_char('\t');}
 	YY_BREAK
 case 54:
 YY_RULE_SETUP
-#line 166 "core/pbrtlex.ll"
+#line 182 "core/pbrtlex.ll"
 {add_string_char('\r');}
 	YY_BREAK
 case 55:
 YY_RULE_SETUP
-#line 167 "core/pbrtlex.ll"
+#line 183 "core/pbrtlex.ll"
 {add_string_char('\b');}
 	YY_BREAK
 case 56:
 YY_RULE_SETUP
-#line 168 "core/pbrtlex.ll"
+#line 184 "core/pbrtlex.ll"
 {add_string_char('\f');}
 	YY_BREAK
 case 57:
 YY_RULE_SETUP
-#line 169 "core/pbrtlex.ll"
+#line 185 "core/pbrtlex.ll"
 {add_string_char('\"');}
 	YY_BREAK
 case 58:
 YY_RULE_SETUP
-#line 170 "core/pbrtlex.ll"
+#line 186 "core/pbrtlex.ll"
 {add_string_char('\\');}
 	YY_BREAK
 case 59:
 YY_RULE_SETUP
-#line 171 "core/pbrtlex.ll"
+#line 187 "core/pbrtlex.ll"
 {
   int val = atoi(yytext+1);
   while (val > 256)
@@ -1366,41 +1400,41 @@ YY_RULE_SETUP
 case 60:
 /* rule 60 can match eol */
 YY_RULE_SETUP
-#line 179 "core/pbrtlex.ll"
+#line 195 "core/pbrtlex.ll"
 {line_num++;}
 	YY_BREAK
 case 61:
 YY_RULE_SETUP
-#line 180 "core/pbrtlex.ll"
+#line 196 "core/pbrtlex.ll"
 { add_string_char(yytext[1]);}
 	YY_BREAK
 case 62:
 YY_RULE_SETUP
-#line 181 "core/pbrtlex.ll"
+#line 197 "core/pbrtlex.ll"
 {BEGIN INITIAL; return STRING;}
 	YY_BREAK
 case 63:
 YY_RULE_SETUP
-#line 182 "core/pbrtlex.ll"
+#line 198 "core/pbrtlex.ll"
 {add_string_char(yytext[0]);}
 	YY_BREAK
 case 64:
 /* rule 64 can match eol */
 YY_RULE_SETUP
-#line 183 "core/pbrtlex.ll"
+#line 199 "core/pbrtlex.ll"
 {Error("Unterminated string!");}
 	YY_BREAK
 case 65:
 YY_RULE_SETUP
-#line 185 "core/pbrtlex.ll"
+#line 201 "core/pbrtlex.ll"
 { Error( "Illegal character: %c (0x%x)", yytext[0], int(yytext[0])); }
 	YY_BREAK
 case 66:
 YY_RULE_SETUP
-#line 186 "core/pbrtlex.ll"
+#line 202 "core/pbrtlex.ll"
 ECHO;
 	YY_BREAK
-#line 1396 "core/pbrtlex.cpp"
+#line 1438 "core/pbrtlex.cpp"
 case YY_STATE_EOF(INITIAL):
 case YY_STATE_EOF(STR):
 case YY_STATE_EOF(COMMENT):
@@ -1535,6 +1569,7 @@ case YY_STATE_EOF(INCL_FILE):
 			"fatal flex scanner internal error--no action found" );
 	} /* end of action switch */
 		} /* end of scanning one token */
+	} /* end of user's declarations */
 } /* end of yylex */
 
 /* yy_get_next_buffer - try to read in a new buffer
@@ -1546,9 +1581,9 @@ case YY_STATE_EOF(INCL_FILE):
  */
 static int yy_get_next_buffer (void)
 {
-    	register char *dest = YY_CURRENT_BUFFER_LVALUE->yy_ch_buf;
-	register char *source = (yytext_ptr);
-	register int number_to_move, i;
+    	char *dest = YY_CURRENT_BUFFER_LVALUE->yy_ch_buf;
+	char *source = (yytext_ptr);
+	yy_size_t number_to_move, i;
 	int ret_val;
 
 	if ( (yy_c_buf_p) > &YY_CURRENT_BUFFER_LVALUE->yy_ch_buf[(yy_n_chars) + 1] )
@@ -1577,7 +1612,7 @@ static int yy_get_next_buffer (void)
 	/* Try to read more data. */
 
 	/* First move last chars to start of buffer. */
-	number_to_move = (int) ((yy_c_buf_p) - (yytext_ptr)) - 1;
+	number_to_move = (yy_size_t) ((yy_c_buf_p) - (yytext_ptr)) - 1;
 
 	for ( i = 0; i < number_to_move; ++i )
 		*(dest++) = *(source++);
@@ -1597,7 +1632,7 @@ static int yy_get_next_buffer (void)
 			{ /* Not enough room in the buffer - grow it. */
 
 			/* just a shorter name for the current buffer */
-			YY_BUFFER_STATE b = YY_CURRENT_BUFFER;
+			YY_BUFFER_STATE b = YY_CURRENT_BUFFER_LVALUE;
 
 			int yy_c_buf_p_offset =
 				(int) ((yy_c_buf_p) - b->yy_ch_buf);
@@ -1680,14 +1715,14 @@ static int yy_get_next_buffer (void)
 
     static yy_state_type yy_get_previous_state (void)
 {
-	register yy_state_type yy_current_state;
-	register char *yy_cp;
+	yy_state_type yy_current_state;
+	char *yy_cp;
     
 	yy_current_state = (yy_start);
 
 	for ( yy_cp = (yytext_ptr) + YY_MORE_ADJ; yy_cp < (yy_c_buf_p); ++yy_cp )
 		{
-		register YY_CHAR yy_c = (*yy_cp ? yy_ec[YY_SC_TO_UI(*yy_cp)] : 1);
+		YY_CHAR yy_c = (*yy_cp ? yy_ec[YY_SC_TO_UI(*yy_cp)] : 1);
 		if ( yy_accept[yy_current_state] )
 			{
 			(yy_last_accepting_state) = yy_current_state;
@@ -1712,10 +1747,10 @@ static int yy_get_next_buffer (void)
  */
     static yy_state_type yy_try_NUL_trans  (yy_state_type yy_current_state )
 {
-	register int yy_is_jam;
-    	register char *yy_cp = (yy_c_buf_p);
+	int yy_is_jam;
+    	char *yy_cp = (yy_c_buf_p);
 
-	register YY_CHAR yy_c = 1;
+	YY_CHAR yy_c = 1;
 	if ( yy_accept[yy_current_state] )
 		{
 		(yy_last_accepting_state) = yy_current_state;
@@ -1730,8 +1765,12 @@ static int yy_get_next_buffer (void)
 	yy_current_state = yy_nxt[yy_base[yy_current_state] + (unsigned int) yy_c];
 	yy_is_jam = (yy_current_state == 393);
 
-	return yy_is_jam ? 0 : yy_current_state;
+		return yy_is_jam ? 0 : yy_current_state;
 }
+
+#ifndef YY_NO_UNPUT
+
+#endif
 
 #ifndef YY_NO_INPUT
 #ifdef __cplusplus
@@ -1781,7 +1820,7 @@ static int yy_get_next_buffer (void)
 				case EOB_ACT_END_OF_FILE:
 					{
 					if ( yywrap( ) )
-						return 0;
+						return EOF;
 
 					if ( ! (yy_did_buffer_switch_on_eof) )
 						YY_NEW_FILE;
@@ -1882,7 +1921,7 @@ static void yy_load_buffer_state  (void)
 	if ( ! b )
 		YY_FATAL_ERROR( "out of dynamic memory in yy_create_buffer()" );
 
-	b->yy_buf_size = size;
+	b->yy_buf_size = (yy_size_t)size;
 
 	/* yy_ch_buf has to be 2 characters longer than the size given because
 	 * we need to put in 2 end-of-buffer characters.
@@ -1917,10 +1956,6 @@ static void yy_load_buffer_state  (void)
 	yyfree((void *) b  );
 }
 
-#ifndef __cplusplus
-extern int isatty (int );
-#endif /* __cplusplus */
-    
 /* Initializes or reinitializes a buffer.
  * This function is sometimes called more than once on the same buffer,
  * such as during a yyrestart() or at EOF.
@@ -2041,7 +2076,7 @@ static void yyensure_buffer_stack (void)
 		 * scanner will even need a stack. We use 2 instead of 1 to avoid an
 		 * immediate realloc on the next call.
          */
-		num_to_alloc = 1;
+      num_to_alloc = 1; /* After all that talk, this was set to 1 anyways... */
 		(yy_buffer_stack) = (struct yy_buffer_state**)yyalloc
 								(num_to_alloc * sizeof(struct yy_buffer_state*)
 								);
@@ -2058,7 +2093,7 @@ static void yyensure_buffer_stack (void)
 	if ((yy_buffer_stack_top) >= ((yy_buffer_stack_max)) - 1){
 
 		/* Increase the buffer to prepare for a possible push. */
-		int grow_size = 8 /* arbitrary grow size */;
+		yy_size_t grow_size = 8 /* arbitrary grow size */;
 
 		num_to_alloc = (yy_buffer_stack_max) + grow_size;
 		(yy_buffer_stack) = (struct yy_buffer_state**)yyrealloc
@@ -2125,8 +2160,8 @@ YY_BUFFER_STATE yy_scan_string (yyconst char * yystr )
 
 /** Setup the input buffer state to scan the given bytes. The next call to yylex() will
  * scan from a @e copy of @a bytes.
- * @param bytes the byte buffer to scan
- * @param len the number of bytes in the buffer pointed to by @a bytes.
+ * @param yybytes the byte buffer to scan
+ * @param _yybytes_len the number of bytes in the buffer pointed to by @a bytes.
  * 
  * @return the newly allocated buffer state object.
  */
@@ -2134,7 +2169,8 @@ YY_BUFFER_STATE yy_scan_bytes  (yyconst char * yybytes, yy_size_t  _yybytes_len 
 {
 	YY_BUFFER_STATE b;
 	char *buf;
-	yy_size_t n, i;
+	yy_size_t n;
+	yy_size_t i;
     
 	/* Get memory for full buffer, including space for trailing EOB's. */
 	n = _yybytes_len + 2;
@@ -2165,7 +2201,7 @@ YY_BUFFER_STATE yy_scan_bytes  (yyconst char * yybytes, yy_size_t  _yybytes_len 
 
 static void yy_fatal_error (yyconst char* msg )
 {
-    	(void) fprintf( stderr, "%s\n", msg );
+			(void) fprintf( stderr, "%s\n", msg );
 	exit( YY_EXIT_FAILURE );
 }
 
@@ -2231,29 +2267,29 @@ char *yyget_text  (void)
 }
 
 /** Set the current line number.
- * @param line_number
+ * @param _line_number line number
  * 
  */
-void yyset_lineno (int  line_number )
+void yyset_lineno (int  _line_number )
 {
     
-    yylineno = line_number;
+    yylineno = _line_number;
 }
 
 /** Set the input stream. This does not discard the current
  * input buffer.
- * @param in_str A readable stream.
+ * @param _in_str A readable stream.
  * 
  * @see yy_switch_to_buffer
  */
-void yyset_in (FILE *  in_str )
+void yyset_in (FILE *  _in_str )
 {
-        yyin = in_str ;
+        yyin = _in_str ;
 }
 
-void yyset_out (FILE *  out_str )
+void yyset_out (FILE *  _out_str )
 {
-        yyout = out_str ;
+        yyout = _out_str ;
 }
 
 int yyget_debug  (void)
@@ -2261,9 +2297,9 @@ int yyget_debug  (void)
         return yy_flex_debug;
 }
 
-void yyset_debug (int  bdebug )
+void yyset_debug (int  _bdebug )
 {
-        yy_flex_debug = bdebug ;
+        yy_flex_debug = _bdebug ;
 }
 
 static int yy_init_globals (void)
@@ -2323,7 +2359,8 @@ int yylex_destroy  (void)
 #ifndef yytext_ptr
 static void yy_flex_strncpy (char* s1, yyconst char * s2, int n )
 {
-	register int i;
+		
+	int i;
 	for ( i = 0; i < n; ++i )
 		s1[i] = s2[i];
 }
@@ -2332,7 +2369,7 @@ static void yy_flex_strncpy (char* s1, yyconst char * s2, int n )
 #ifdef YY_NEED_STRLEN
 static int yy_flex_strlen (yyconst char * s )
 {
-	register int n;
+	int n;
 	for ( n = 0; s[n]; ++n )
 		;
 
@@ -2342,11 +2379,12 @@ static int yy_flex_strlen (yyconst char * s )
 
 void *yyalloc (yy_size_t  size )
 {
-	return (void *) malloc( size );
+			return (void *) malloc( size );
 }
 
 void *yyrealloc  (void * ptr, yy_size_t  size )
 {
+		
 	/* The cast to (char *) in the following accommodates both
 	 * implementations that use char* generic pointers, and those
 	 * that use void* generic pointers.  It works with the latter
@@ -2359,12 +2397,12 @@ void *yyrealloc  (void * ptr, yy_size_t  size )
 
 void yyfree (void * ptr )
 {
-	free( (char *) ptr );	/* see yyrealloc() for (char *) cast */
+			free( (char *) ptr );	/* see yyrealloc() for (char *) cast */
 }
 
 #define YYTABLES_NAME "yytables"
 
-#line 186 "core/pbrtlex.ll"
+#line 202 "core/pbrtlex.ll"
 
 
 int yywrap() {

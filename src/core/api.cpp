@@ -93,6 +93,7 @@
 #include "renderers/metropolis.h"
 #include "renderers/samplerrenderer.h"
 #include "renderers/surfacepoints.h"
+#include "renderers/bpt.h"
 #include "samplers/adaptive.h"
 #include "samplers/bestcandidate.h"
 #include "samplers/halton.h"
@@ -1242,6 +1243,13 @@ Renderer *RenderOptions::MakeRenderer() const {
         Point pCamera = camera->CameraToWorld(camera->shutterOpen, Point(0, 0, 0));
         renderer = CreateSurfacePointsRenderer(RendererParams, pCamera, camera->shutterOpen);
         RendererParams.ReportUnused();
+    }
+    else if(RendererName == "bpt"){
+        renderer = CreateBPTRenderer(RendererParams, camera);
+        RendererParams.ReportUnused();
+        if (lights.size() == 0)
+            Warning("No light sources defined in scene; "
+                "possibly rendering a black image.");
     }
     else {
         if (RendererName != "sampler")
