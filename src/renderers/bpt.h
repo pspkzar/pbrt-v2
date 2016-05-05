@@ -8,6 +8,8 @@
 #include "pbrt.h"
 #include "renderer.h"
 
+struct BPTVertex;
+
 class BPTRenderer : public Renderer{
 public:
 	BPTRenderer(int samplesPerPixel, int maxDepth, Camera *camera){
@@ -32,6 +34,10 @@ public:
 
 	int maxDepth, samplesPerPixel;
 	Camera *camera;
+
+private:
+	void TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPath, int px, int py);
+	void TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, int px, int py);
 };
 
 BPTRenderer *CreateBPTRenderer(const ParamSet &params, Camera *camera);
