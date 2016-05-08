@@ -2,12 +2,16 @@
 #include "paramset.h"
 #include "camera.h"
 #include "film.h"
+#include "intersection.h"
 #include "bpt.h"
 
 
 struct BPTVertex
 {
 	/* data */
+	Intersection isect;
+	float dvc;
+	float dvcm;
 };
 
 
@@ -28,6 +32,39 @@ void BPTRenderer::Render(const Scene *scene){
 		}
 	}
 }
+
+void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPath, int px, int py){
+	lightPath.clear();
+	//sample light
+	//select direction and init ray and weights
+	int end=maxDepth;
+	do{
+		//intesect ray
+			//exit if miss
+		//store intersection
+		//connect to camera
+		//russian roulete
+		//sample next direction
+			//exit if sample fails
+	}while(--end);
+}
+
+void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, int px, int py){
+	cameraPath.clear();
+	//sample camera direction and calc weights
+	int end=maxDepth;
+	do{
+		//intersect ray
+			//exit if miss
+		//store intersection
+		//connect to light
+		//connect to light path
+		//russian roulete
+		//sample next direction
+			//exti if sample fails
+	}while(--end);
+}
+
 
 Spectrum BPTRenderer::Li(const Scene *scene, const RayDifferential &ray,
         const Sample *sample, RNG &rng, MemoryArena &arena,

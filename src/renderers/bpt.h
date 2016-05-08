@@ -7,6 +7,7 @@
 
 #include "pbrt.h"
 #include "renderer.h"
+#include "rng.h"
 
 struct BPTVertex;
 
@@ -33,6 +34,7 @@ public:
         RNG &rng, MemoryArena &arena) const;
 
 	int maxDepth, samplesPerPixel;
+	RNG rng;
 	Camera *camera;
 
 private:
