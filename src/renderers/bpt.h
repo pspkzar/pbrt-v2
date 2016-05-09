@@ -36,10 +36,11 @@ public:
 	int maxDepth, samplesPerPixel;
 	RNG rng;
 	Camera *camera;
+	MemoryArena arena;
 
 private:
-	void TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPath, int px, int py);
-	void TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, int px, int py);
+	void TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPath, float time, int px, int py);
+	void TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, float time, int px, int py);
 };
 
 BPTRenderer *CreateBPTRenderer(const ParamSet &params, Camera *camera);
