@@ -139,19 +139,77 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 }
 
 void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, float time, int px, int py){
+	BPTVertex vertex;
+	RayDifferential ray;
 	
 	//sample camera direction and calc weights
+	CameraSample camSample;
+	camSample.imageX = rng.RandomFloat() + float(px);
+	camSample.imageY = rng.RandomFloat() + float(py);
+	camSample.lensU = rng.RandomFloat();
+	camSample.lensV = rng.RandomFloat();
+	camSample.time = time;
+
+	camera->GenerateRayDifferential(camSample, &ray);
+
 	int end=maxDepth;
 	do{
-		//intersect ray
-			//exit if miss
-		//update weights
-		//store intersection
-		//connect to light
-		//connect to light path
-		//russian roulete
+		//intersect ray and exit if miss
+		Intersection isect;
+		if(!scene->Intersect(ray, &isect))
+			return;
+		Point position = vertex.bsdf->dgShading.p;
+		Normal normal = vertex.bsdf->dgShading.nn;
+
+		//update weights post untersection
+		vertex.bsdf=isect.GetBSDF(ray, arena);
+		float tSquare = (position-ray.o).LengthSquared();
+		float cosTheta = AbsDot(normal, ray.d);
+		vertex.dvcm *= tSquare / cosTheta;
+		vertex.dvc /= cosTheta;
+
+		//TODO connect to light
+
+		//TODO connect to light path
+
 		//sample next direction
-			//exti if sample fails
+		float bsdfPdf;
+		BxDFType sampledType;
+		Vector out;
+		Spectrum f = vertex.bsdf->Sample_f(-ray.d, &out, BSDFSample(rng), &bsdfPdf, BSDF_ALL, &sampledType);
+		
+		//exit if sample fails
+		if(f.IsBlack() || bsdfPdf == 0.f)
+			return;
+		
+		//calc attenuation
+		float cosOut = AbsDot(out, normal);
+		f *= cosOut / bsdfPdf;
+		
+		//russian roulete
+		float surviveProb = min(f.y(), 1.f);
+		if(rng.RandomFloat() > surviveProb)
+			return;
+		f /= surviveProb;
+		
+		//update weights pre intersection
+		bsdfPdf *= surviveProb;
+		float reversePdf = vertex.bsdf->Pdf(out, -ray.d) * surviveProb;
+		if(sampledType & BSDF_SPECULAR) {
+			vertex.dvcm=0.f;
+			vertex.dvc *= cosOut;
+		}
+		else {
+			
+			vertex.dvc = (cosOut / bsdfPdf) * (vertex.dvcm + reversePdf * vertex.dvc);
+			vertex.dvcm = 1.f / bsdfPdf;
+		}
+		
+		//update ray
+		ray.o = position;
+		ray.d = out;
+		vertex.throughput *= f;
+		vertex.in = out;
 	}while(--end);
 }
 
