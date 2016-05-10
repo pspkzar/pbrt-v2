@@ -39,11 +39,13 @@ void BPTRenderer::Render(const Scene *scene){
 			}
 		}
 	}
+	camera->film->WriteImage();
 }
 
 void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPath, float time, int px, int py){
 	BPTVertex vertex;
-	RayDifferential ray;
+	Ray ray;
+	float nLightPath = float(camera->film->xResolution * camera->film->yResolution);
 	
 	//sample light
 	int lightIndex = (int(rng.RandomFloat() * scene->lights.size())) % scene->lights.size();
@@ -80,12 +82,12 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		Normal normal = vertex.bsdf->dgShading.nn;
 		
 		//update weights post intersection
-		vertex.bsdf=isect.GetBSDF(ray, arena);
+		float tSquare = (position-ray.o).LengthSquared();
+		vertex.bsdf=isect.GetBSDF(RayDifferential(ray), arena);
 		if(end==maxDepth && !scene->lights[lightIndex]->IsDeltaLight()){
 			float lightSamplingPdf=scene->lights[lightIndex]->Pdf(vertex.bsdf->dgShading.p, -ray.d);
-			vertex.dvcm*=lightSamplingPdf;
+			vertex.dvcm *= lightSamplingPdf * (cosAtLight / tSquare);
 		}
-		float tSquare = (position-ray.o).LengthSquared();
 		float cosTheta = AbsDot(normal, ray.d);
 		vertex.dvcm *= tSquare / cosTheta;
 		vertex.dvc /= cosTheta;
@@ -94,8 +96,30 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		lightPath.push_back(vertex);
 		
 		//connect to camera
-		
-		//TODO CONNECT TO CAMERA
+		CameraSample sample;
+		sample.lensU=rng.RandomFloat();
+		sample.lensV=rng.RandomFloat();
+		sample.time = time;
+		VisibilityTester vis;
+		Vector camDir;
+		float camPdf;
+		Spectrum camResponse = camera->Sample_Wi(position, &sample, &camDir, &camPdf, &vis);
+		if(!camResponse.IsBlack() && camPdf != 0.f && vis.Unoccluded(scene)){
+			Spectrum res = camResponse * vertex.bsdf->f(-vertex.in, camDir);
+			res /= camPdf;
+			float camDirPdfW;
+			camera->Pdf_We(Ray(vis.r.o, camDir, 1e-3, INFINITY, vis.r.time), NULL, &camDirPdfW);
+			float camDirPdfA = camDirPdfW * AbsDot(camDir, normal) / (position-vis.r.o).LengthSquared();
+			float reverseBsdfPdf = vertex.bsdf->Pdf(camDir, -ray.d);
+
+			//calc MIS weights
+			float wLight = camDirPdfA / nLightPath * (vertex.dvcm + reverseBsdfPdf * vertex.dvc);
+			float weight = 1.f / (wLight + 1.f);
+
+			//add contribution
+			camera->film->Splat(sample, weight * res / float(samplesPerPixel));
+			
+		}
 		
 		//sample next direction
 		float bsdfPdf;
@@ -140,17 +164,25 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 
 void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, float time, int px, int py){
 	BPTVertex vertex;
-	RayDifferential ray;
-	
-	//sample camera direction and calc weights
+	Ray ray;
+	Spectrum result(0.f);
+	float nLightPath = float(camera->film->xResolution * camera->film->yResolution);
+
+	//sample camera direction 
 	CameraSample camSample;
 	camSample.imageX = rng.RandomFloat() + float(px);
 	camSample.imageY = rng.RandomFloat() + float(py);
 	camSample.lensU = rng.RandomFloat();
 	camSample.lensV = rng.RandomFloat();
 	camSample.time = time;
-
-	camera->GenerateRayDifferential(camSample, &ray);
+	camera->GenerateRay(camSample, &ray);
+	vertex.throughput = Spectrum(1.f);
+	vertex.in = ray.d;
+	//calc weights
+	float camDirPdfW;
+	camera->Pdf_We(ray, NULL, &camDirPdfW);
+	vertex.dvcm = nLightPath / camDirPdfW;
+	vertex.dvc = 0.f;
 
 	int end=maxDepth;
 	do{
@@ -162,15 +194,43 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		Normal normal = vertex.bsdf->dgShading.nn;
 
 		//update weights post untersection
-		vertex.bsdf=isect.GetBSDF(ray, arena);
+		vertex.bsdf=isect.GetBSDF(RayDifferential(ray), arena);
 		float tSquare = (position-ray.o).LengthSquared();
 		float cosTheta = AbsDot(normal, ray.d);
 		vertex.dvcm *= tSquare / cosTheta;
 		vertex.dvc /= cosTheta;
 
+		//Check if hit light
+		const AreaLight *l=isect.primitive->GetAreaLight();
+		if(l){
+			Spectrum Lemmit = l->L(position, normal, -ray.d);
+			float weight=1.f;
+			if(end!=maxDepth){
+				float pdfIllum = l->Pdf(ray.o, ray.d) * cosTheta / (tSquare * scene->lights.size());
+				float wCam = pdfIllum * vertex.dvcm + INV_TWOPI * vertex.dvc;
+				weight = 1.f / (wCam + 1.f);
+			}
+			result += Lemmit * vertex.throughput * weight;
+		}
+
 		//TODO connect to light
+		int lightIndex = (int(rng.RandomFloat() * scene->lights.size())) % scene->lights.size();
+		float lightPdf = 1.f / float(scene->lights.size());
+		Vector lightDir;
+		float lightPointPdfW;
+		VisibilityTester vis;
+		Spectrum L = scene->lights[lightIndex]->Sample_L(position, 1e-3, LightSample(rng), time, &lightDir, &lightPointPdfW, &vis);
+		Spectrum bsdfFactor = vertex.bsdf->f(-ray.d, lightDir);
+		if(!L.IsBlack() && lightPointPdfW!=0.f && bsdfFactor.y()>0.f && vis.Unoccluded(scene)){
+			Spectrum contrib = (L / lightPdf) * bsdfFactor* vertex.throughput;
+			//TODO Finish Direct lighting 
+
+		}
 
 		//TODO connect to light path
+		for(int i = 0; i<lightPath.size(); i++){
+
+		}
 
 		//sample next direction
 		float bsdfPdf;
@@ -211,6 +271,9 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		vertex.throughput *= f;
 		vertex.in = out;
 	}while(--end);
+
+	camera->film->Splat(camSample, result);
+
 }
 
 

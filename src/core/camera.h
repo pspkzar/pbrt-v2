@@ -40,6 +40,7 @@
 #include "pbrt.h"
 #include "geometry.h"
 #include "transform.h"
+#include "spectrum.h"
 
 // Camera Declarations
 class Camera {
@@ -51,6 +52,21 @@ public:
     virtual float GenerateRay(const CameraSample &sample,
                               Ray *ray) const = 0;
     virtual float GenerateRayDifferential(const CameraSample &sample, RayDifferential *rd) const;
+
+    virtual Spectrum Sample_Wi(const Point &p, CameraSample *sample, Vector *wi, float *pdf, VisibilityTester *vis){
+        Severe("Unimplemented Camera::Sample_Wi() method called.");
+        return 0.f;
+    }
+
+    virtual Spectrum We(const Ray &ray, float *rasterX, float *rasterY){
+        Severe("Unimplemented Camera::We() method called.");
+        return 0.f;
+    }
+
+
+    virtual void Pdf_We(const Ray &ray, float *posPdf, float *dirPdf){
+        Severe("Unimplemented Camera::Pdf_We() method called.");
+    }
 
     // Camera Public Data
     AnimatedTransform CameraToWorld;
