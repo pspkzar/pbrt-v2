@@ -51,6 +51,13 @@ public:
     float GenerateRay(const CameraSample &sample, Ray *) const;
     float GenerateRayDifferential(const CameraSample &sample,
                                   RayDifferential *ray) const;
+
+    Spectrum Sample_Wi(const Point &p, CameraSample *sample, Vector *wi, float *pdf, VisibilityTester *vis);
+
+    Spectrum We(const Ray &ray, float *rasterX, float *rasterY);
+
+    void Pdf_We(const Ray &ray, float *posPdf, float *dirPdf);
+    
 private:
     // PerspectiveCamera Private Data
     Vector dxCamera, dyCamera;

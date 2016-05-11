@@ -36,6 +36,7 @@
 #include "paramset.h"
 #include "sampler.h"
 #include "montecarlo.h"
+#include "light.h"
 
 // PerspectiveCamera Method Definitions
 PerspectiveCamera:: PerspectiveCamera(const AnimatedTransform &cam2world,
@@ -137,6 +138,91 @@ float PerspectiveCamera::GenerateRayDifferential(const CameraSample &sample,
     return 1.f;
 }
 
+Spectrum PerspectiveCamera::Sample_Wi(const Point &p, CameraSample *sample, Vector *wi, float *pdf, VisibilityTester *vis){
+    Point pLens(0,0,0);
+    if(lensRadius > 0){
+        float lensU, lensV;
+        ConcentricSampleDisk(sample->lensU, sample->lensV, &lensU, &lensV);
+        lensU *= lensRadius;
+        lensV *= lensRadius;
+
+        pLens.x = lensU;
+        pLens.y = lensV;
+    }
+    Point pLensWorld = CameraToWorld(sample->time, pLens);
+
+    vis->SetSegment(pLensWorld, 0, p, 1e-3, sample->time);
+
+    *wi = pLensWorld - p;
+    float dist = wi->Length();
+    *wi /= dist;
+
+    float lensArea = lensRadius != 0 ? (M_PI * lensRadius * lensRadius) : 1;
+    float cosTheta = AbsDot(*wi, CameraToWorld(sample->time, Vector(0,0,1)));
+    *pdf = (dist * dist) / (cosTheta * lensArea);
+
+    return We(Ray(pLensWorld, -(*wi), 0, INFINITY, sample->time), &(sample->imageX), &(sample->imageY));
+}
+
+Spectrum PerspectiveCamera::We(const Ray &ray, float *rasterX, float *rasterY){
+    
+    Point pMin = RasterToCamera(Point(0, 0, 0));
+    Point pMax = RasterToCamera(Point(film->xResolution, film->yResolution, 0));
+    pMin /= pMin.z;
+    pMax /= pMax.z;
+    float A = fabsf((pMax.x - pMin.x) * (pMax.y - pMin.y));
+
+    Transform c2w;
+    CameraToWorld.Interpolate(ray.time, &c2w);
+    float cosTheta = Dot(ray.d, c2w(Vector(0,0,1)));
+    if(cosTheta <= 0.f) return 0.f;
+
+    Point pFocus = ray((lensRadius > 0 ? focalDistance : 1) / cosTheta);
+    Point pRaster = Inverse(RasterToCamera)(Inverse(c2w)(pFocus));
+
+    if(rasterX) *rasterX = pRaster.x;
+    if(rasterY) *rasterY = pRaster.y;
+
+    if(pRaster.x < 0.f || pRaster.x > film->xResolution || pRaster.y < 0.f || pRaster.y > film->yResolution)
+        return 0.f;
+
+    float lensArea = lensRadius != 0 ? (M_PI * lensRadius * lensRadius) : 1;
+
+    float cos2Theta = cosTheta * cosTheta;
+    return Spectrum(1 / (A * lensArea * cos2Theta * cos2Theta));
+
+}
+
+void PerspectiveCamera::Pdf_We(const Ray &ray, float *pdfPos, float *pdfDir){
+    Point pMin = RasterToCamera(Point(0, 0, 0));
+    Point pMax = RasterToCamera(Point(film->xResolution, film->yResolution, 0));
+    pMin /= pMin.z;
+    pMax /= pMax.z;
+    float A = fabsf((pMax.x - pMin.x) * (pMax.y - pMin.y));
+
+    Transform c2w;
+    CameraToWorld.Interpolate(ray.time, &c2w);
+    float cosTheta = Dot(ray.d, c2w(Vector(0, 0, 1)));
+    if (cosTheta <= 0) {
+        *pdfPos = *pdfDir = 0;
+        return;
+    }
+
+    // Map ray $(\p{}, \w{})$ onto the raster grid
+    Point pFocus = ray((lensRadius > 0 ? focalDistance : 1) / cosTheta);
+    Point pRaster = Inverse(RasterToCamera)(Inverse(c2w)(pFocus));
+
+    // Return zero probability for out of bounds points
+    if(pRaster.x < 0.f || pRaster.x > film->xResolution || pRaster.y < 0.f || pRaster.y > film->yResolution){
+        *pdfPos = *pdfDir = 0;
+        return;
+    }
+
+    // Compute lens area of perspective camera
+    float lensArea = lensRadius != 0 ? (M_PI * lensRadius * lensRadius) : 1;
+    *pdfPos = 1 / lensArea;
+    *pdfDir = 1 / (A * cosTheta * cosTheta * cosTheta);
+}
 
 PerspectiveCamera *CreatePerspectiveCamera(const ParamSet &params,
         const AnimatedTransform &cam2world, Film *film) {

@@ -107,8 +107,8 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		if(!camResponse.IsBlack() && camPdf != 0.f && vis.Unoccluded(scene)){
 			Spectrum res = camResponse * vertex.bsdf->f(-vertex.in, camDir);
 			res /= camPdf;
-			float camDirPdfW;
-			camera->Pdf_We(Ray(vis.r.o, camDir, 1e-3, INFINITY, vis.r.time), NULL, &camDirPdfW);
+			float camDirPdfW, camPointPdf;
+			camera->Pdf_We(Ray(vis.r.o, camDir, 0, INFINITY, vis.r.time), &camPointPdf, &camDirPdfW);
 			float camDirPdfA = camDirPdfW * AbsDot(camDir, normal) / (position-vis.r.o).LengthSquared();
 			float reverseBsdfPdf = vertex.bsdf->Pdf(camDir, -vertex.in);
 
@@ -178,8 +178,8 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 	vertex.throughput = Spectrum(1.f);
 	vertex.in = ray.d;
 	//calc weights
-	float camDirPdfW;
-	camera->Pdf_We(ray, NULL, &camDirPdfW);
+	float camDirPdfW, camPointPdf;
+	camera->Pdf_We(ray, &camPointPdf, &camDirPdfW);
 	vertex.dvcm = nLightPath / camDirPdfW;
 	vertex.dvc = 0.f;
 
