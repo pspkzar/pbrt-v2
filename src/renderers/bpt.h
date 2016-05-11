@@ -41,6 +41,7 @@ public:
 private:
 	void TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPath, float time, int px, int py);
 	void TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, float time, int px, int py);
+	Spectrum ConnectVertices(const BPTVertex &camV, const BPTVertex &lightV, float time, const Scene *scene);
 };
 
 BPTRenderer *CreateBPTRenderer(const ParamSet &params, Camera *camera);

@@ -15,6 +15,7 @@ struct BPTVertex
 	Spectrum throughput;
 	Vector in;
 	BSDF *bsdf;
+	Intersection isect;
 	float dvc;
 	float dvcm;
 };
@@ -75,15 +76,14 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 	int end=maxDepth;
 	do{
 		//intesect ray and exit if miss
-		Intersection isect;
-		if(!scene->Intersect(ray, &isect))
+		if(!scene->Intersect(ray, &vertex.isect))
 			return;
+		vertex.bsdf=vertex.isect.GetBSDF(ray, arena);
 		Point position = vertex.bsdf->dgShading.p;
 		Normal normal = vertex.bsdf->dgShading.nn;
 		
 		//update weights post intersection
 		float tSquare = (position-ray.o).LengthSquared();
-		vertex.bsdf=isect.GetBSDF(ray, arena);
 		if(end==maxDepth && !scene->lights[lightIndex]->IsDeltaLight()){
 			float lightSamplingPdf=scene->lights[lightIndex]->Pdf(vertex.bsdf->dgShading.p, -vertex.in);
 			vertex.dvcm *= lightSamplingPdf * (cosAtLight / tSquare);
@@ -155,7 +155,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		}
 		
 		//update ray
-		ray = RayDifferential(position, out, ray, isect.rayEpsilon);
+		ray = RayDifferential(position, out, ray, vertex.isect.rayEpsilon);
 		vertex.throughput *= f;
 		vertex.in = out;
 	}while(--end);
@@ -186,21 +186,21 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 	int end=maxDepth;
 	do{
 		//intersect ray and exit if miss
-		Intersection isect;
-		if(!scene->Intersect(ray, &isect))
+		
+		if(!scene->Intersect(ray, &vertex.isect))
 			return;
+		vertex.bsdf=vertex.isect.GetBSDF(ray, arena);
 		Point position = vertex.bsdf->dgShading.p;
 		Normal normal = vertex.bsdf->dgShading.nn;
 
 		//update weights post untersection
-		vertex.bsdf=isect.GetBSDF(ray, arena);
 		float tSquare = (position-ray.o).LengthSquared();
 		float cosTheta = AbsDot(normal, vertex.in);
 		vertex.dvcm *= tSquare / cosTheta;
 		vertex.dvc /= cosTheta;
 
 		//Check if hit light
-		const AreaLight *l=isect.primitive->GetAreaLight();
+		const AreaLight *l=vertex.isect.primitive->GetAreaLight();
 		if(l){
 			Spectrum Lemmit = l->L(position, normal, -vertex.in);
 			float weight=1.f;
@@ -219,7 +219,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		float lightPointPdfW;
 		VisibilityTester vis;
 		LightSample ls(rng);
-		Spectrum L = scene->lights[lightIndex]->Sample_L(position, isect.rayEpsilon, ls, time, &lightDir, &lightPointPdfW, &vis);
+		Spectrum L = scene->lights[lightIndex]->Sample_L(position, vertex.isect.rayEpsilon, ls, time, &lightDir, &lightPointPdfW, &vis);
 		Spectrum bsdfFactor = vertex.bsdf->f(-vertex.in, lightDir);
 		if(!L.IsBlack() && lightPointPdfW!=0.f && !bsdfFactor.IsBlack() && vis.Unoccluded(scene)){
 			Spectrum contrib = (L / (lightPdf*lightPointPdfW)) * bsdfFactor* vertex.throughput;
@@ -253,7 +253,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 
 		//TODO connect to light path
 		for(int i = 0; i<lightPath.size(); i++){
-
+			result += ConnectVertices(vertex, lightPath[i], time, scene);
 		}
 
 		//sample next direction
@@ -290,13 +290,42 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		}
 		
 		//update ray
-		ray = RayDifferential(position, out, ray, isect.rayEpsilon);
+		ray = RayDifferential(position, out, ray, vertex.isect.rayEpsilon);
 		vertex.throughput *= f;
 		vertex.in = out;
 	}while(--end);
 
 	camera->film->Splat(camSample, result/float(samplesPerPixel));
 
+}
+
+Spectrum BPTRenderer::ConnectVertices(const BPTVertex &camV, const BPTVertex &lightV, float time, const Scene *scene){
+	Vector cam2lightDir = (lightV.bsdf->dgShading.p - camV.bsdf->dgShading.p);
+	float tSquare = cam2lightDir.LengthSquared();
+	cam2lightDir = Normalize(cam2lightDir);
+
+	float cosAtCamV = AbsDot(cam2lightDir, camV.bsdf->dgShading.nn);
+	float cosAtLightV = AbsDot(cam2lightDir, lightV.bsdf->dgShading.nn);
+	//calc result
+	Spectrum result = camV.throughput * 
+					  camV.bsdf->f(-camV.in, cam2lightDir) * 
+					  lightV.bsdf->f(-lightV.in, -cam2lightDir) * 
+					  lightV.throughput *
+					  cosAtCamV *
+					  cosAtLightV /
+					  tSquare;
+
+	//test visibility
+	VisibilityTester vis;
+	vis.SetSegment(camV.bsdf->dgShading.p, camV.isect.rayEpsilon, lightV.bsdf->dgShading.p, lightV.isect.rayEpsilon, time);
+	if(!result.IsBlack() && vis.Unoccluded(scene)){
+		//calc weights
+		float wCam = lightV.bsdf->Pdf(-lightV.in, -cam2lightDir) * (cosAtCamV / tSquare) * (camV.dvcm + camV.bsdf->Pdf(cam2lightDir, -camV.in) * camV.dvc);
+		float wLight = camV.bsdf->Pdf(-camV.in, cam2lightDir) * (cosAtLightV / tSquare) * (lightV.dvcm + lightV.bsdf->Pdf(-cam2lightDir, -lightV.in) * lightV.dvc);
+		float weight = 1.f / (wCam + wLight + 1.f);
+		return result * weight;
+	}
+	else return 0.f;
 }
 
 
