@@ -74,6 +74,10 @@ public:
         const Scene *scene, bool computeLightVisibility, float time,
         RNG &rng, Spectrum *coeffs) const;
 
+    virtual void Pdf_Le(const LightSample &ls, const Vector &wi, 
+        float *pointPdf, float *dirPdf, Point *lPoint, Normal *lNormal){
+      Severe("Unimplemented Light::Pdf_Le() method called");
+    }
     // Light Public Data
     const int nSamples;
 protected:
