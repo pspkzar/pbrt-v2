@@ -75,7 +75,7 @@ public:
         RNG &rng, Spectrum *coeffs) const;
 
     virtual void Pdf_Le(const LightSample &ls, const Vector &wi, 
-        float *pointPdf, float *dirPdf, Point *lPoint, Normal *lNormal){
+        float *pointPdf, float *dirPdf, Point *lPoint, Normal *lNormal) const{
       Severe("Unimplemented Light::Pdf_Le() method called");
     }
     // Light Public Data

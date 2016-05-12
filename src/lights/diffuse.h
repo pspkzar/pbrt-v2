@@ -58,6 +58,9 @@ public:
         Vector *wo, float *pdf, VisibilityTester *visibility) const;
     Spectrum Sample_L(const Scene *scene, const LightSample &ls, float u1, float u2,
         float time, Ray *ray, Normal *Ns, float *pdf) const;
+
+    void Pdf_Le(const LightSample &ls, const Vector &wi, 
+        float *pointPdf, float *dirPdf, Point *lPoint, Normal *lNormal) const;
 protected:
     // DiffuseAreaLight Protected Data
     Spectrum Lemit;

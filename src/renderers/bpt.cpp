@@ -7,8 +7,6 @@
 #include "memory.h"
 #include "bpt.h"
 
-
-
 struct BPTVertex
 {
 	/* data */
@@ -28,15 +26,18 @@ class BPTTask : public Task {
 void BPTRenderer::Render(const Scene *scene){
 
 	vector<BPTVertex> lightPath;
-	vector<BPTVertex> cameraPath;
-	for(int i=0; i<camera->film->xResolution; i++){
-		for (int j = 0; j < camera->film->yResolution; j++){
+
+	int x0, x1, y0, y1;
+    camera->film->GetPixelExtent(&x0, &x1, &y0, &y1);
+	
+	for(int i=x0; i<x1; i++){
+		for (int j = y0; j < y1; j++){
 			for(int s=0; s<samplesPerPixel; s++){
 				float time = rng.RandomFloat();
 				lightPath.clear();
-				cameraPath.clear();
 				TraceLightPath(scene, lightPath, time, i,j);
-				TraceCameraPath(scene, lightPath, cameraPath, time, i, j);
+				TraceCameraPath(scene, lightPath, time, i, j);
+				arena.FreeAll();
 			}
 		}
 	}
@@ -61,7 +62,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 	
 	//select direction and init ray and weights
 	float cosAtLight = AbsDot(Normalize(lightNormal), ray.d);
-	vertex.throughput *=  cosAtLight / (lightPdf * lightPointDirPdf);
+	vertex.throughput /= (lightPdf * lightPointDirPdf);
 	vertex.in = ray.d;
 	if(scene->lights[lightIndex]->IsDeltaLight()){
 		vertex.dvcm = 1.f / lightPointDirPdf;
@@ -77,7 +78,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 	do{
 		//intesect ray and exit if miss
 		if(!scene->Intersect(ray, &vertex.isect))
-			return;
+			break;
 		vertex.bsdf=vertex.isect.GetBSDF(ray, arena);
 		Point position = vertex.bsdf->dgShading.p;
 		Normal normal = vertex.bsdf->dgShading.nn;
@@ -105,8 +106,8 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		float camPdf;
 		Spectrum camResponse = camera->Sample_Wi(position, &sample, &camDir, &camPdf, &vis);
 		if(!camResponse.IsBlack() && camPdf != 0.f && vis.Unoccluded(scene)){
-			Spectrum res = camResponse * vertex.bsdf->f(-vertex.in, camDir);
-			res /= camPdf;
+			Spectrum res = camResponse * vertex.bsdf->f(-vertex.in, camDir) * vertex.throughput / camPdf;
+			
 			float camDirPdfW, camPointPdf;
 			camera->Pdf_We(Ray(vis.r.o, camDir, 0, INFINITY, vis.r.time), &camPointPdf, &camDirPdfW);
 			float camDirPdfA = camDirPdfW * AbsDot(camDir, normal) / (position-vis.r.o).LengthSquared();
@@ -118,7 +119,6 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 
 			//add contribution
 			camera->film->Splat(sample, weight * res / float(samplesPerPixel));
-			
 		}
 		
 		//sample next direction
@@ -129,7 +129,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		
 		//exit if sample fails
 		if(f.IsBlack() || bsdfPdf == 0.f)
-			return;
+			break;
 		
 		//calc attenuation
 		float cosOut = AbsDot(out, normal);
@@ -138,7 +138,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		//russian roulete
 		float surviveProb = min(f.y(), 1.f);
 		if(rng.RandomFloat() > surviveProb)
-			return;
+			break;
 		f /= surviveProb;
 		
 		//update weights pre intersection
@@ -161,13 +161,13 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 	}while(--end);
 }
 
-void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, vector<BPTVertex> &cameraPath, float time, int px, int py){
+void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, float time, int px, int py){
 	BPTVertex vertex;
 	RayDifferential ray;
 	Spectrum result(0.f);
 	float nLightPath = float(camera->film->xResolution * camera->film->yResolution);
 
-	//sample camera direction 
+	//sample camera direction
 	CameraSample camSample;
 	camSample.imageX = rng.RandomFloat() + float(px);
 	camSample.imageY = rng.RandomFloat() + float(py);
@@ -188,7 +188,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		//intersect ray and exit if miss
 		
 		if(!scene->Intersect(ray, &vertex.isect))
-			return;
+			break;
 		vertex.bsdf=vertex.isect.GetBSDF(ray, arena);
 		Point position = vertex.bsdf->dgShading.p;
 		Normal normal = vertex.bsdf->dgShading.nn;
@@ -264,7 +264,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		
 		//exit if sample fails
 		if(f.IsBlack() || bsdfPdf == 0.f)
-			return;
+			break;
 		
 		//calc attenuation
 		float cosOut = AbsDot(out, normal);
@@ -273,7 +273,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		//russian roulete
 		float surviveProb = min(f.y(), 1.f);
 		if(rng.RandomFloat() > surviveProb)
-			return;
+			break;
 		f /= surviveProb;
 		
 		//update weights pre intersection
@@ -342,7 +342,7 @@ Spectrum BPTRenderer::Transmittance(const Scene *scene,
 }
 
 BPTRenderer *CreateBPTRenderer(const ParamSet &params, Camera *camera){
-	int samplesPerPixel = params.FindOneInt("samplesPerPixel", 256);
-	int maxDepth = params.FindOneInt("maxDepth", 10);
+	int samplesPerPixel = params.FindOneInt("samplesperpixel", 256);
+	int maxDepth = params.FindOneInt("maxdepth", 10);
 	return new BPTRenderer(samplesPerPixel, maxDepth, camera);
 }

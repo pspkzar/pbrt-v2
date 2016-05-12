@@ -101,3 +101,12 @@ Spectrum DiffuseAreaLight::Sample_L(const Scene *scene,
 }
 
 
+void DiffuseAreaLight::Pdf_Le(const LightSample &ls, const Vector &wi, 
+        float *pointPdf, float *dirPdf, Point *lPoint, Normal *lNormal) const{
+
+    *lPoint = shapeSet->Sample(ls, lNormal);
+    *pointPdf = shapeSet->Pdf(*lPoint);
+    if(Dot(wi, *lNormal)) *dirPdf = 0.f;
+    else *dirPdf = INV_TWOPI;
+
+}
