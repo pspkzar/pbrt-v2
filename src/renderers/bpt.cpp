@@ -6,6 +6,7 @@
 #include "scene.h"
 #include "memory.h"
 #include "bpt.h"
+#include <iostream>
 
 struct BPTVertex
 {
@@ -106,7 +107,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		Spectrum camResponse = camera->Sample_Wi(position, &sample, &camDir, &camPdf, &vis);
 		if(!camResponse.IsBlack() && camPdf != 0.f && vis.Unoccluded(scene)){
 			Spectrum bsdfFactor = vertex.bsdf->f(-vertex.in, camDir);
-			Spectrum res = camResponse * bsdfFactor * vertex.throughput / camPdf;
+			Spectrum res = camResponse * bsdfFactor * AbsDot(camDir, normal) * vertex.throughput / camPdf;
 			
 			float camDirPdfW, camPointPdf;
 			camera->Pdf_We(Ray(vis.r.o, camDir, 0, INFINITY, vis.r.time), &camPointPdf, &camDirPdfW);
@@ -115,7 +116,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 			float reverseSurviveProb = min(1.f,(bsdfFactor.y() * AbsDot(vertex.in, normal) / reverseBsdfPdf));
 			reverseBsdfPdf *= reverseSurviveProb;
 			//calc MIS weights
-			float wLight = camDirPdfA / nLightPath * (vertex.dvcm + reverseBsdfPdf * vertex.dvc);
+			float wLight = camDirPdfA * (vertex.dvcm + reverseBsdfPdf * vertex.dvc);
 			float weight = 1.f / (wLight + 1.f);
 
 			//add contribution
@@ -148,12 +149,11 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		float reverseSurviveProb = min(1.f, vertex.bsdf->f(out, -vertex.in).y()*AbsDot(vertex.in, normal) / reversePdf);
 		reversePdf *= reverseSurviveProb;
 
-		if(sampledType & BSDF_SPECULAR) {
+		if((sampledType & BSDF_SPECULAR) != 0) {
 			vertex.dvcm=0.f;
 			vertex.dvc *= cosOut;
 		}
-		else {
-			
+		else {		
 			vertex.dvc = (cosOut / bsdfPdf) * (vertex.dvcm + reversePdf * vertex.dvc);
 			vertex.dvcm = 1.f / bsdfPdf;
 		}
@@ -184,7 +184,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 	//calc weights
 	float camDirPdfW, camPointPdf;
 	camera->Pdf_We(ray, &camPointPdf, &camDirPdfW);
-	vertex.dvcm = nLightPath / camDirPdfW;
+	vertex.dvcm = 1.f / camDirPdfW;
 	vertex.dvc = 0.f;
 
 	int end=maxDepth;
@@ -206,14 +206,18 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		//Check if hit light
 		const AreaLight *l=vertex.isect.primitive->GetAreaLight();
 		if(l){
-			Spectrum Lemmit = l->L(position, normal, -vertex.in);
-			float weight=1.f;
-			if(end!=maxDepth){
-				float pdfIllum = l->Pdf(position, vertex.in) * cosTheta / (tSquare * scene->lights.size());
-				float wCam = pdfIllum * vertex.dvcm + INV_TWOPI * vertex.dvc;
-				weight = 1.f / (wCam + 1.f);
+			Spectrum Lemmit = vertex.isect.Le(-vertex.in);
+			if(!Lemmit.IsBlack()){
+				
+				float weight=1.f;
+				if(end!=maxDepth){
+					float pdfIllum = l->Pdf(position, vertex.in) * cosTheta / (tSquare * scene->lights.size());
+					float wCam = pdfIllum * vertex.dvcm + INV_TWOPI * vertex.dvc;
+					weight = 1.f / (wCam + 1.f);
+				}
+			
+				result += Lemmit * vertex.throughput * weight;
 			}
-			result += Lemmit * vertex.throughput * weight;
 		}
 
 		//TODO connect to light
@@ -226,7 +230,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		Spectrum L = scene->lights[lightIndex]->Sample_L(position, vertex.isect.rayEpsilon, ls, time, &lightDir, &lightPointPdfW, &vis);
 		Spectrum bsdfFactor = vertex.bsdf->f(-vertex.in, lightDir);
 		if(!L.IsBlack() && lightPointPdfW!=0.f && !bsdfFactor.IsBlack() && vis.Unoccluded(scene)){
-			Spectrum contrib = (L / (lightPdf*lightPointPdfW)) * bsdfFactor* vertex.throughput;
+			Spectrum contrib = (L * bsdfFactor * vertex.throughput * AbsDot(lightDir, normal)) / (lightPdf*lightPointPdfW) ;
 			Point lightPoint;
 			Normal lightNormal;
 			float lEmitPointPdf, lEmitDirPdf;
@@ -293,12 +297,11 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		float reverseSurviveProb = min(1.f, vertex.bsdf->f(out, -vertex.in).y()*AbsDot(vertex.in, normal) / reversePdf);
 		reversePdf *= reverseSurviveProb;
 
-		if(sampledType & BSDF_SPECULAR) {
+		if((sampledType & BSDF_SPECULAR) != 0) {
 			vertex.dvcm=0.f;
 			vertex.dvc *= cosOut;
 		}
 		else {
-			
 			vertex.dvc = (cosOut / bsdfPdf) * (vertex.dvcm + reversePdf * vertex.dvc);
 			vertex.dvcm = 1.f / bsdfPdf;
 		}
