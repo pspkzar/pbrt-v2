@@ -18,7 +18,6 @@ struct BPTVertex
 	float dvcm;
 };
 
-
 class BPTTask : public Task {
 
 };
@@ -106,13 +105,15 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		float camPdf;
 		Spectrum camResponse = camera->Sample_Wi(position, &sample, &camDir, &camPdf, &vis);
 		if(!camResponse.IsBlack() && camPdf != 0.f && vis.Unoccluded(scene)){
-			Spectrum res = camResponse * vertex.bsdf->f(-vertex.in, camDir) * vertex.throughput / camPdf;
+			Spectrum bsdfFactor = vertex.bsdf->f(-vertex.in, camDir);
+			Spectrum res = camResponse * bsdfFactor * vertex.throughput / camPdf;
 			
 			float camDirPdfW, camPointPdf;
 			camera->Pdf_We(Ray(vis.r.o, camDir, 0, INFINITY, vis.r.time), &camPointPdf, &camDirPdfW);
 			float camDirPdfA = camDirPdfW * AbsDot(camDir, normal) / (position-vis.r.o).LengthSquared();
 			float reverseBsdfPdf = vertex.bsdf->Pdf(camDir, -vertex.in);
-
+			float reverseSurviveProb = min(1.f,(bsdfFactor.y() * AbsDot(vertex.in, normal) / reverseBsdfPdf));
+			reverseBsdfPdf *= reverseSurviveProb;
 			//calc MIS weights
 			float wLight = camDirPdfA / nLightPath * (vertex.dvcm + reverseBsdfPdf * vertex.dvc);
 			float weight = 1.f / (wLight + 1.f);
@@ -143,7 +144,10 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 		
 		//update weights pre intersection
 		bsdfPdf *= surviveProb;
-		float reversePdf = vertex.bsdf->Pdf(out, -vertex.in) * surviveProb;
+		float reversePdf = vertex.bsdf->Pdf(out, -vertex.in);
+		float reverseSurviveProb = min(1.f, vertex.bsdf->f(out, -vertex.in).y()*AbsDot(vertex.in, normal) / reversePdf);
+		reversePdf *= reverseSurviveProb;
+
 		if(sampledType & BSDF_SPECULAR) {
 			vertex.dvcm=0.f;
 			vertex.dvc *= cosOut;
@@ -232,7 +236,10 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 			float weight=1.f;
 			if(scene->lights[lightIndex]->IsDeltaLight()){
 				float wCam = lEmitDirPdf * AbsDot(lightDir, normal) / lDistSquare;
-				wCam *= vertex.dvcm + vertex.bsdf->Pdf(lightDir, -vertex.in) * vertex.dvc;
+				float revBsdfPdf = vertex.bsdf->Pdf(lightDir, -vertex.in);
+				float revSurviveProb = min(1.f, bsdfFactor.y() * AbsDot(normal, vertex.in) / revBsdfPdf);
+				revBsdfPdf *= revSurviveProb;
+				wCam *= vertex.dvcm + revBsdfPdf * vertex.dvc;
 				weight = 1.f / (wCam * 1.f);
 			}
 			else{
@@ -240,11 +247,15 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 				float cosAtLight = AbsDot(lightDir, lightNormal);
 				float bsdfToLightPdfA = bsdfToLightPdfW * cosAtLight / lDistSquare;
 				float lightPointPdfA = lightPointPdfW * AbsDot(lightDir, normal) / lDistSquare;
-				float wLight = bsdfToLightPdfA / lightPointPdfA;
+				
+				float revBsdfPdf = vertex.bsdf->Pdf(lightDir, -vertex.in);
+				float revSurviveProb = min(1.f, bsdfFactor.y() * AbsDot(normal, vertex.in) / revBsdfPdf);
+				revBsdfPdf *= revSurviveProb;
 
+				float wLight = bsdfToLightPdfA / lightPointPdfA;
 				float wCam = (lEmitPointPdf/lightPointPdfA) * 
 							lEmitDirPdf * (AbsDot(lightDir, normal) / lDistSquare) * 
-							(vertex.dvcm + vertex.bsdf->Pdf(lightDir, -vertex.in) * vertex.dvc);
+							(vertex.dvcm + revBsdfPdf * vertex.dvc);
 
 				weight = 1.f / (wLight + 1.f + wCam);
 			}
@@ -252,7 +263,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		}
 
 		//TODO connect to light path
-		for(int i = 0; i<lightPath.size(); i++){
+		for(int i = 0; i<end-1 && i<lightPath.size(); i++){
 			result += ConnectVertices(vertex, lightPath[i], time, scene);
 		}
 
@@ -278,7 +289,10 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 		
 		//update weights pre intersection
 		bsdfPdf *= surviveProb;
-		float reversePdf = vertex.bsdf->Pdf(out, -vertex.in) * surviveProb;
+		float reversePdf = vertex.bsdf->Pdf(out, -vertex.in);
+		float reverseSurviveProb = min(1.f, vertex.bsdf->f(out, -vertex.in).y()*AbsDot(vertex.in, normal) / reversePdf);
+		reversePdf *= reverseSurviveProb;
+
 		if(sampledType & BSDF_SPECULAR) {
 			vertex.dvcm=0.f;
 			vertex.dvc *= cosOut;
@@ -306,10 +320,13 @@ Spectrum BPTRenderer::ConnectVertices(const BPTVertex &camV, const BPTVertex &li
 
 	float cosAtCamV = AbsDot(cam2lightDir, camV.bsdf->dgShading.nn);
 	float cosAtLightV = AbsDot(cam2lightDir, lightV.bsdf->dgShading.nn);
+
+	Spectrum camBsdfFactor = camV.bsdf->f(-camV.in, cam2lightDir);
+	Spectrum lBsdfFactor = lightV.bsdf->f(-lightV.in, -cam2lightDir);
 	//calc result
 	Spectrum result = camV.throughput * 
-					  camV.bsdf->f(-camV.in, cam2lightDir) * 
-					  lightV.bsdf->f(-lightV.in, -cam2lightDir) * 
+					  camBsdfFactor * 
+					  lBsdfFactor * 
 					  lightV.throughput *
 					  cosAtCamV *
 					  cosAtLightV /
@@ -320,9 +337,27 @@ Spectrum BPTRenderer::ConnectVertices(const BPTVertex &camV, const BPTVertex &li
 	vis.SetSegment(camV.bsdf->dgShading.p, camV.isect.rayEpsilon, lightV.bsdf->dgShading.p, lightV.isect.rayEpsilon, time);
 	if(!result.IsBlack() && vis.Unoccluded(scene)){
 		//calc weights
-		float wCam = lightV.bsdf->Pdf(-lightV.in, -cam2lightDir) * (cosAtCamV / tSquare) * (camV.dvcm + camV.bsdf->Pdf(cam2lightDir, -camV.in) * camV.dvc);
-		float wLight = camV.bsdf->Pdf(-camV.in, cam2lightDir) * (cosAtLightV / tSquare) * (lightV.dvcm + lightV.bsdf->Pdf(-cam2lightDir, -lightV.in) * lightV.dvc);
+		float camPdf = camV.bsdf->Pdf(-camV.in, cam2lightDir);
+		float camSurviveProb = min(1.f, camBsdfFactor.y() * AbsDot(cam2lightDir, camV.bsdf->dgShading.nn) / camPdf);
+		camPdf *= camSurviveProb;
+
+		float camRevPdf = camV.bsdf->Pdf(cam2lightDir, -camV.in);
+		float camRevSurviveProb = min(1.f, camBsdfFactor.y() * AbsDot(camV.in, camV.bsdf->dgShading.nn) / camRevPdf);
+		camRevPdf *= camRevSurviveProb;
+
+		float lPdf = lightV.bsdf->Pdf(-lightV.in, -cam2lightDir);
+		float lSurviveProb = min(1.f, lBsdfFactor.y() * AbsDot(cam2lightDir, lightV.bsdf->dgShading.nn) / lPdf);
+		lPdf *= lSurviveProb;
+
+		float lRevPdf = lightV.bsdf->Pdf(-cam2lightDir, -lightV.in);
+		float lRevSurviveProb = min(1.f, lBsdfFactor.y() * AbsDot(-lightV.in, lightV.bsdf->dgShading.nn) / lPdf);
+		lRevPdf *= lRevSurviveProb;
+
+		float wCam = lPdf * (cosAtCamV / tSquare) * (camV.dvcm + camRevPdf * camV.dvc);
+		float wLight = camPdf * (cosAtLightV / tSquare) * (lightV.dvcm + lRevPdf * lightV.dvc);
+		
 		float weight = 1.f / (wCam + wLight + 1.f);
+		
 		return result * weight;
 	}
 	else return 0.f;
