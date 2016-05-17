@@ -13,10 +13,11 @@ struct BPTVertex;
 
 class BPTRenderer : public Renderer{
 public:
-	BPTRenderer(int samplesPerPixel, int maxDepth, Camera *camera){
-		this->camera=camera;
-		this->samplesPerPixel=samplesPerPixel;
-		this->maxDepth=maxDepth;
+	BPTRenderer(int samplesPerPixel, int maxDepth, Camera *camera, bool lightTraceOnly){
+		this->camera = camera;
+		this->samplesPerPixel = samplesPerPixel;
+		this->maxDepth = maxDepth;
+		this->lightTraceOnly = lightTraceOnly;
 	}
 
 	~BPTRenderer(){
@@ -34,6 +35,7 @@ public:
         RNG &rng, MemoryArena &arena) const;
 
 	int maxDepth, samplesPerPixel;
+	bool lightTraceOnly;
 	RNG rng;
 	Camera *camera;
 	MemoryArena arena;

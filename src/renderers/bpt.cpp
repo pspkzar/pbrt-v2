@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #include "parallel.h"
 #include "paramset.h"
 #include "camera.h"
@@ -5,8 +6,9 @@
 #include "intersection.h"
 #include "scene.h"
 #include "memory.h"
+#include "progressreporter.h"
 #include "bpt.h"
-#include <iostream>
+
 
 struct BPTVertex
 {
@@ -30,17 +32,20 @@ void BPTRenderer::Render(const Scene *scene){
 	int x0, x1, y0, y1;
     camera->film->GetPixelExtent(&x0, &x1, &y0, &y1);
 	
+	ProgressReporter reporter((x1-x0)>>2, "Rendering");
 	for(int i=x0; i<x1; i++){
 		for (int j = y0; j < y1; j++){
 			for(int s=0; s<samplesPerPixel; s++){
 				float time = rng.RandomFloat();
 				lightPath.clear();
 				TraceLightPath(scene, lightPath, time, i,j);
-				TraceCameraPath(scene, lightPath, time, i, j);
+				if(!lightTraceOnly) TraceCameraPath(scene, lightPath, time, i, j);
 				arena.FreeAll();
 			}
 		}
+		if ((i % (1<<2)) == 0 ) reporter.Update();
 	}
+	reporter.Done();
 	camera->film->WriteImage();
 }
 
@@ -62,7 +67,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 	
 	//select direction and init ray and weights
 	float cosAtLight = AbsDot(Normalize(lightNormal), ray.d);
-	vertex.throughput /= (lightPdf * lightPointDirPdf);
+	vertex.throughput = cosAtLight / (lightPdf * lightPointDirPdf);
 	vertex.in = ray.d;
 	if(scene->lights[lightIndex]->IsDeltaLight()){
 		vertex.dvcm = 1.f / lightPointDirPdf;
@@ -109,15 +114,18 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 			Spectrum bsdfFactor = vertex.bsdf->f(-vertex.in, camDir);
 			Spectrum res = camResponse * bsdfFactor * AbsDot(camDir, normal) * vertex.throughput / camPdf;
 			
-			float camDirPdfW, camPointPdf;
-			camera->Pdf_We(Ray(vis.r.o, camDir, 0, INFINITY, vis.r.time), &camPointPdf, &camDirPdfW);
-			float camDirPdfA = camDirPdfW * AbsDot(camDir, normal) / (position-vis.r.o).LengthSquared();
-			float reverseBsdfPdf = vertex.bsdf->Pdf(camDir, -vertex.in);
-			float reverseSurviveProb = min(1.f,(bsdfFactor.y() * AbsDot(vertex.in, normal) / reverseBsdfPdf));
-			reverseBsdfPdf *= reverseSurviveProb;
-			//calc MIS weights
-			float wLight = camDirPdfA * (vertex.dvcm + reverseBsdfPdf * vertex.dvc);
-			float weight = 1.f / (wLight + 1.f);
+			float weight = 1.f;
+			if(!lightTraceOnly){
+				float camDirPdfW, camPointPdf;
+				camera->Pdf_We(Ray(vis.r.o, camDir, 0, INFINITY, vis.r.time), &camPointPdf, &camDirPdfW);
+				float camDirPdfA = camDirPdfW * AbsDot(camDir, normal) / (position-vis.r.o).LengthSquared();
+				float reverseBsdfPdf = vertex.bsdf->Pdf(camDir, -vertex.in);
+				float reverseSurviveProb = min(1.f,(bsdfFactor.y() * AbsDot(vertex.in, normal) / reverseBsdfPdf));
+				reverseBsdfPdf *= reverseSurviveProb;
+				//calc MIS weights
+				float wLight = camDirPdfA * (vertex.dvcm + reverseBsdfPdf * vertex.dvc);
+				weight = 1.f / (wLight + 1.f);
+			}
 
 			//add contribution
 			camera->film->Splat(sample, weight * res / float(samplesPerPixel));
@@ -382,5 +390,6 @@ Spectrum BPTRenderer::Transmittance(const Scene *scene,
 BPTRenderer *CreateBPTRenderer(const ParamSet &params, Camera *camera){
 	int samplesPerPixel = params.FindOneInt("samplesperpixel", 256);
 	int maxDepth = params.FindOneInt("maxdepth", 10);
-	return new BPTRenderer(samplesPerPixel, maxDepth, camera);
+	bool lightTraceOnly = params.FindOneBool("lighttraceonly", false);
+	return new BPTRenderer(samplesPerPixel, maxDepth, camera, );
 }
