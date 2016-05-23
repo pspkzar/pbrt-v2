@@ -1,10 +1,12 @@
 LookAt 0 -3.4 0   0 1 0 0 0 1
 Camera "perspective" "float fov" [45]
 
-Film "image" "string filename" ["cornell-bpt.exr"]
+Film "image" "string filename" ["cornell-pt.exr"]
      "integer xresolution" [400] "integer yresolution" [400]
 
-Renderer "bpt" "integer samplesperpixel" [1024]
+Sampler "lowdiscrepancy" "integer pixelsamples" [32]
+     
+SurfaceIntegrator "path" 
 
 WorldBegin
 

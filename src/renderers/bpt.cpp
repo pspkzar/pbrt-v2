@@ -6,12 +6,11 @@
 #include "intersection.h"
 #include "scene.h"
 #include "memory.h"
-#include "progressreporter.h"
 #include "bpt.h"
+#include "progressreporter.h"
+#include <iostream>
 
-
-struct BPTVertex
-{
+struct BPTVertex{
 	/* data */
 	Spectrum throughput;
 	Vector in;
@@ -21,35 +20,57 @@ struct BPTVertex
 	float dvcm;
 };
 
-class BPTTask : public Task {
-
-};
-
 void BPTRenderer::Render(const Scene *scene){
 
-	vector<BPTVertex> lightPath;
+	vector<Task *> renderTasks;
 
-	int x0, x1, y0, y1;
-    camera->film->GetPixelExtent(&x0, &x1, &y0, &y1);
-	
-	ProgressReporter reporter((x1-x0)>>2, "Rendering");
-	for(int i=x0; i<x1; i++){
-		for (int j = y0; j < y1; j++){
-			for(int s=0; s<samplesPerPixel; s++){
-				float time = rng.RandomFloat();
-				lightPath.clear();
-				TraceLightPath(scene, lightPath, time, i,j);
-				if(!lightTraceOnly) TraceCameraPath(scene, lightPath, time, i, j);
-				arena.FreeAll();
-			}
-		}
-		if ((i % (1<<2)) == 0 ) reporter.Update();
-	}
-	reporter.Done();
+    int nTasks = 32 * NumSystemCores();
+    nTasks = RoundUpPow2(nTasks);
+
+    ProgressReporter reporter(nTasks, "Rendering");
+   	for (int i = 0; i < nTasks; ++i)
+		renderTasks.push_back(new BPTTask(scene, this, camera, maxDepth, samplesPerPixel, lightTraceOnly, reporter, nTasks-1-i, nTasks));
+
+	EnqueueTasks(renderTasks);
+    WaitForAllTasks();
+    for (uint32_t i = 0; i < renderTasks.size(); ++i)
+        delete renderTasks[i];
+    reporter.Done();
 	camera->film->WriteImage();
 }
 
-void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPath, float time, int px, int py){
+
+void BPTTask::Run () {
+	vector<BPTVertex> lightPath;
+	RNG rng(taskNum);
+	MemoryArena arena;
+
+	
+	// Compute number of BPTTasks to create for rendering
+	int x0, x1, y0, y1;
+    camera->film->GetPixelExtent(&x0, &x1, &y0, &y1);
+    float nPixPerTask = float((x1-x0)*(y1-y0)) / float(taskCount);
+	int TaskFirstPix = int(nPixPerTask * float(taskNum));
+	int TaskLastPix = int(nPixPerTask * float(taskNum+1));
+	TaskLastPix = (TaskLastPix > ((x1-x0)*(y1-y0)) ? ((x1-x0)*(y1-y0)) : TaskLastPix);
+	for(int i=TaskFirstPix; i<TaskLastPix; i++){
+		int py = i / (x1-x0);
+		int px = i % (x1-x0);
+		py += y0;
+		px += x0;
+		for(int s=0; s<samplesPerPixel; s++){
+			float time = rng.RandomFloat();
+			lightPath.clear();
+			TraceLightPath(scene, rng, arena, lightPath, time, px,py);
+			if (!lightTraceOnly) TraceCameraPath(scene, rng, arena, lightPath, time, px, py);
+			arena.FreeAll();
+		}
+		
+	}
+	reporter.Update();
+}
+
+void BPTTask::TraceLightPath(const Scene *scene, RNG &rng, MemoryArena &arena, vector<BPTVertex> &lightPath, float time, int px, int py){
 	BPTVertex vertex;
 	RayDifferential ray;
 	float nLightPath = float(camera->film->xResolution * camera->film->yResolution);
@@ -67,7 +88,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 	
 	//select direction and init ray and weights
 	float cosAtLight = AbsDot(Normalize(lightNormal), ray.d);
-	vertex.throughput = cosAtLight / (lightPdf * lightPointDirPdf);
+	vertex.throughput *= cosAtLight / (lightPdf * lightPointDirPdf);
 	vertex.in = ray.d;
 	if(scene->lights[lightIndex]->IsDeltaLight()){
 		vertex.dvcm = 1.f / lightPointDirPdf;
@@ -173,7 +194,7 @@ void BPTRenderer::TraceLightPath(const Scene *scene, vector<BPTVertex> &lightPat
 	}while(--end);
 }
 
-void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPath, float time, int px, int py){
+void BPTTask::TraceCameraPath(const Scene *scene, RNG &rng, MemoryArena &arena, vector<BPTVertex> &lightPath, float time, int px, int py){
 	BPTVertex vertex;
 	RayDifferential ray;
 	Spectrum result(0.f);
@@ -256,6 +277,9 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 			}
 			else{
 				float bsdfToLightPdfW = vertex.bsdf->Pdf(-vertex.in, lightDir);
+				float bsdfSurviveProb = min(1.f, bsdfFactor.y() * AbsDot(normal, lightDir) / bsdfToLightPdfW);
+				bsdfToLightPdfW *= bsdfSurviveProb;
+
 				float cosAtLight = AbsDot(lightDir, lightNormal);
 				float bsdfToLightPdfA = bsdfToLightPdfW * cosAtLight / lDistSquare;
 				float lightPointPdfA = lightPointPdfW * AbsDot(lightDir, normal) / lDistSquare;
@@ -324,7 +348,7 @@ void BPTRenderer::TraceCameraPath(const Scene *scene, vector<BPTVertex> &lightPa
 
 }
 
-Spectrum BPTRenderer::ConnectVertices(const BPTVertex &camV, const BPTVertex &lightV, float time, const Scene *scene){
+Spectrum BPTTask::ConnectVertices(const BPTVertex &camV, const BPTVertex &lightV, float time, const Scene *scene){
 	Vector cam2lightDir = (lightV.bsdf->dgShading.p - camV.bsdf->dgShading.p);
 	float tSquare = cam2lightDir.LengthSquared();
 	cam2lightDir = Normalize(cam2lightDir);
@@ -375,6 +399,7 @@ Spectrum BPTRenderer::ConnectVertices(const BPTVertex &camV, const BPTVertex &li
 }
 
 
+
 Spectrum BPTRenderer::Li(const Scene *scene, const RayDifferential &ray,
         const Sample *sample, RNG &rng, MemoryArena &arena,
         Intersection *isect, Spectrum *T) const{
@@ -391,5 +416,5 @@ BPTRenderer *CreateBPTRenderer(const ParamSet &params, Camera *camera){
 	int samplesPerPixel = params.FindOneInt("samplesperpixel", 256);
 	int maxDepth = params.FindOneInt("maxdepth", 10);
 	bool lightTraceOnly = params.FindOneBool("lighttraceonly", false);
-	return new BPTRenderer(samplesPerPixel, maxDepth, camera, );
+	return new BPTRenderer(samplesPerPixel, maxDepth, lightTraceOnly, camera);
 }
