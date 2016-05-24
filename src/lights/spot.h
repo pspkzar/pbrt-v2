@@ -54,6 +54,9 @@ public:
     Spectrum Sample_L(const Scene *scene, const LightSample &ls,
         float u1, float u2, float time, Ray *ray, Normal *Ns, float *pdf) const;
     float Pdf(const Point &, const Vector &) const;
+    
+    void Pdf_Le(const LightSample &ls, const Vector &wi, 
+        float *pointPdf, float *dirPdf, Point *lPoint, Normal *lNormal) const;
 private:
     // SpotLight Private Data
     Point lightPos;

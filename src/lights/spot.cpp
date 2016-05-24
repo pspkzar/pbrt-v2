@@ -113,4 +113,18 @@ Spectrum SpotLight::Sample_L(const Scene *scene, const LightSample &ls,
     return Intensity * Falloff(ray->d);
 }
 
-
+void SpotLight::Pdf_Le(const LightSample &ls, const Vector &wi, 
+        float *pointPdf, float *dirPdf, Point *lPoint, Normal *lNormal) const{
+    *lPoint = lightPos;
+    *pointPdf = 1.f;
+    *lNormal = Normal(wi);
+    
+    Vector spotDir = LightToWorld(Vector(0,0,1));
+    float cosLightDir = Dot(wi, spotDir);
+    if(cosLightDir < cosTotalWidth){
+        *dirPdf = 0.f;
+    }
+    else {
+        *dirPdf = UniformConePdf(cosTotalWidth);
+    }
+}

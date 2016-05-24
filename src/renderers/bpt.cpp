@@ -27,7 +27,7 @@ void BPTRenderer::Render(const Scene *scene){
     int nTasks = 32 * NumSystemCores();
     nTasks = RoundUpPow2(nTasks);
 
-    ProgressReporter reporter(nTasks, "Rendering");
+    ProgressReporter reporter(nTasks * samplesPerPixel, "Rendering");
    	for (int i = 0; i < nTasks; ++i)
 		renderTasks.push_back(new BPTTask(scene, this, camera, maxDepth, samplesPerPixel, lightTraceOnly, reporter, nTasks-1-i, nTasks));
 
@@ -53,6 +53,7 @@ void BPTTask::Run () {
 	int TaskFirstPix = int(nPixPerTask * float(taskNum));
 	int TaskLastPix = int(nPixPerTask * float(taskNum+1));
 	TaskLastPix = (TaskLastPix > ((x1-x0)*(y1-y0)) ? ((x1-x0)*(y1-y0)) : TaskLastPix);
+	int progressCounter = TaskLastPix - TaskFirstPix;
 	for(int i=TaskFirstPix; i<TaskLastPix; i++){
 		int py = i / (x1-x0);
 		int px = i % (x1-x0);
@@ -64,10 +65,15 @@ void BPTTask::Run () {
 			TraceLightPath(scene, rng, arena, lightPath, time, px,py);
 			if (!lightTraceOnly) TraceCameraPath(scene, rng, arena, lightPath, time, px, py);
 			arena.FreeAll();
+			progressCounter--;
+			if(!progressCounter){
+				reporter.Update();
+				progressCounter = TaskLastPix - TaskFirstPix;
+			}
 		}
 		
 	}
-	reporter.Update();
+	
 }
 
 void BPTTask::TraceLightPath(const Scene *scene, RNG &rng, MemoryArena &arena, vector<BPTVertex> &lightPath, float time, int px, int py){
