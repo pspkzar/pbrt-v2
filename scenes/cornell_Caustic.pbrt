@@ -1,0 +1,145 @@
+LookAt 0 -3.4 0   0 1 0 0 0 1
+Camera "perspective" "float fov" [45]
+#Sampler "random" "integer pixelsamples" [16]
+Sampler "lowdiscrepancy" "integer pixelsamples" [64]
+Film "image" "string filename" ["cornell-Caustic-BPT256.exr"]
+     "integer xresolution" [1024] "integer yresolution" [1024]
+#SurfaceIntegrator "directlighting" "string strategy" ["one"]
+#SurfaceIntegrator "path"
+#SurfaceIntegrator "photonmap" "bool finalgather" ["true"] "integer causticphotons" [200000] "integer indirectphotons" [200000] "integer finalgathersamples" [32]
+
+
+Renderer "bpt" "integer samplesperpixel" [512]
+
+WorldBegin
+
+Identity
+
+#Spot Light Source
+AttributeBegin
+  LightSource "spot" 
+		"color I"    	[50 50 50]
+		"point from" 	[0 -.8 0.4]
+		"point to"		[-.45 -.35 -.45]
+		"float coneangle" 	[35.]
+		"float conedeltaangle" 	[30.]
+AttributeEnd
+
+# walls
+AttributeBegin
+  # white walls  material
+  Material "plastic" 
+              "color Kd"    [1 1 1]
+		"color Ks"    [0.1 0.1 0.1]
+		"float roughness" 0.15
+  # back wall
+  Shape "trianglemesh" 
+     		"integer indices" [0 1 2 2 3 0]
+		"point P" [-1 1 -1   -1 1 1   1 1 1   1 1 -1]
+ # floor
+ Shape "trianglemesh" 
+     		"integer indices" [0 1 2 2 3 0]
+		"point P" [-1 1 -1   1 1 -1   1 -1 -1   -1 -1 -1] 
+ 
+ # aluminium ceiling material
+  Texture "tbump-tex" "float" "imagemap" "string filename" "textures/lines.exr"
+	"float uscale" .4 "float vscale" .4
+
+  Material "metal"  "float roughness" [.03]
+      "spectrum eta" "spds/metals/Al.eta.spd"
+      "spectrum k" "spds/metals/Al.k.spd"
+	 "texture bumpmap" "tbump-tex"
+
+  # ceiling
+  Shape "trianglemesh" 
+     		"integer indices" [2 1 0 0 3 2]
+		"point P" [-1 1 1   1 1 1   1 -1 1   -1 -1 1]
+		"float uv" [1 0 0 0 0 1 1 1]
+  # red wall material
+  Material "plastic" 
+              "color Kd"    [0.8 0.1 0.1]
+		  "color Ks"    [0.1 0.1 0.1]
+		  "float roughness" 0.15
+  # left red wall
+  Shape "trianglemesh" 
+     		"integer indices" [0 1 2 2 3 0]
+		"point P" [-1 -1 -1   -1 -1 1   -1 1 1   -1 1 -1]
+  # blue wall material
+  Material "plastic" 
+              "color Kd"    [0.2 0.3 0.8]
+		  "color Ks"    [0.1 0.1 0.1]
+		  "float roughness" 0.15
+  # right blue wall
+  Shape "trianglemesh" 
+     		"integer indices" [2 1 0 0 3 2]
+		"point P" [1 -1 -1   1 -1 1   1 1 1   1 1 -1]
+AttributeEnd
+
+# mirror
+AttributeBegin
+  # mirror material
+  Material "mirror" 
+		  "color Kr"    [0.9 0.9 0.9]
+  # mirror
+  Shape "trianglemesh" 
+     		"integer indices" [2 1 0 1 3 2]
+		"point P" [0.99 -0.65 0    0.99 0.65 0   0.99 -0.65 -0.9        0.99 0.65 -0.9]
+AttributeEnd
+
+# green prism
+AttributeBegin
+  Material "plastic" 
+           "color Kd"    [0.1 0.9 0.1]
+		"color Ks"    [0 0 0]
+		"float roughness" 0.15
+  Translate 0.6 0.4 -.7
+  Rotate 45 0 0 -1
+  Scale 0.25 0.25 0.3
+  Shape "trianglemesh" 
+     		"integer indices" [0 1 2 2 3 0 0 1 5 5 4 0 1 2 5 5 6 2 2 6 3 3 6 7 0 3 4 4 7 3 7 4 5 5 6 7 ]
+		"point P" [-1 1 -1   -1 1 1   1 1 1   1 1 -1   -1 -1 -1   -1 -1 1   1 -1 1   1 -1 -1]
+AttributeEnd
+
+#teapot
+AttributeBegin
+  Material "metal"  "float roughness" [.001]
+      "spectrum eta" "spds/metals/Au.eta.spd"
+      "spectrum k" "spds/metals/Au.k.spd"
+
+  Translate 0.65 0.4 -.41
+  Rotate 090 1 0 0
+  Rotate 45 0 -1 0
+  Scale 0.15 0.15 0.15
+  Include "geometry/room-teapot.pbrt"
+AttributeEnd
+
+#killeroo
+AttributeBegin
+  Material "glass"  
+      "float index" [2.0]
+      "spectrum Kt" [300 0.9 400 0.9 500 0.9 600 0.9 700 0.9 800 0.9]
+      "spectrum Kr" [300 0.1 400 0.1 500 0.1 600 0.1 700 0.1 800 0.1]
+
+  Translate -0.45 -.35 -.45
+  Rotate 135 0 0 1
+  Scale 0.004 0.004 0.004
+  Include "geometry/killeroo.pbrt"
+AttributeEnd
+
+# painting
+AttributeBegin
+  Texture "painting" "color" "imagemap" "string filename" "textures/oGrito_EdwardMunch.tga" "float scale" [2] "float gamma" [2.]
+  Material "plastic" 
+              "texture Kd"    "painting"
+		  "color Ks"    [0.2 0.2 0.2]
+  # canvas
+  Scale 1.2 1 1.2
+  Shape "trianglemesh" 
+     		"integer indices" [0 1 2 2 3 0]
+		"point P" [-.6 .99 -.3   -.6 .99 .44   0 .99 .44   0 .99 -.3]
+           "float uv" [1 0 1 1 0 1 0 0]
+AttributeEnd
+
+
+
+WorldEnd

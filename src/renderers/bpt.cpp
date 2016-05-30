@@ -246,7 +246,7 @@ void BPTTask::TraceCameraPath(const Scene *scene, RNG &rng, MemoryArena &arena, 
 				
 				float weight=1.f;
 				if(end!=maxDepth){
-					float pdfIllum = l->Pdf(position, vertex.in) * cosTheta / (tSquare * scene->lights.size());
+					float pdfIllum = l->Pdf(position-sqrtf(tSquare)*vertex.in, vertex.in) * cosTheta / (tSquare * scene->lights.size());
 					float wCam = pdfIllum * vertex.dvcm + INV_TWOPI * vertex.dvc;
 					weight = 1.f / (wCam + 1.f);
 				}
@@ -255,7 +255,7 @@ void BPTTask::TraceCameraPath(const Scene *scene, RNG &rng, MemoryArena &arena, 
 			}
 		}
 
-		//TODO connect to light
+		//connect to light
 		int lightIndex = (int(rng.RandomFloat() * scene->lights.size())) % scene->lights.size();
 		float lightPdf = 1.f / float(scene->lights.size());
 		Vector lightDir;
@@ -279,7 +279,7 @@ void BPTTask::TraceCameraPath(const Scene *scene, RNG &rng, MemoryArena &arena, 
 				float revSurviveProb = min(1.f, bsdfFactor.y() * AbsDot(normal, vertex.in) / revBsdfPdf);
 				revBsdfPdf *= revSurviveProb;
 				wCam *= vertex.dvcm + revBsdfPdf * vertex.dvc;
-				weight = 1.f / (wCam * 1.f);
+				weight = 1.f / (wCam + 1.f);
 			}
 			else{
 				float bsdfToLightPdfW = vertex.bsdf->Pdf(-vertex.in, lightDir);
@@ -288,15 +288,15 @@ void BPTTask::TraceCameraPath(const Scene *scene, RNG &rng, MemoryArena &arena, 
 
 				float cosAtLight = AbsDot(lightDir, lightNormal);
 				float bsdfToLightPdfA = bsdfToLightPdfW * cosAtLight / lDistSquare;
-				float lightPointPdfA = lightPointPdfW * AbsDot(lightDir, normal) / lDistSquare;
+				float lightPointPdfA = lightPointPdfW * cosAtLight / lDistSquare;
 				
 				float revBsdfPdf = vertex.bsdf->Pdf(lightDir, -vertex.in);
 				float revSurviveProb = min(1.f, bsdfFactor.y() * AbsDot(normal, vertex.in) / revBsdfPdf);
 				revBsdfPdf *= revSurviveProb;
 
-				float wLight = bsdfToLightPdfA / lightPointPdfA;
+				float wLight = bsdfToLightPdfA / (lightPointPdfA * lightPdf);
 				float wCam = (lEmitPointPdf/lightPointPdfA) * 
-							lEmitDirPdf * (AbsDot(lightDir, normal) / lDistSquare) * 
+							(lEmitDirPdf * (AbsDot(lightDir, normal) / lDistSquare)) * 
 							(vertex.dvcm + revBsdfPdf * vertex.dvc);
 
 				weight = 1.f / (wLight + 1.f + wCam);
@@ -304,7 +304,7 @@ void BPTTask::TraceCameraPath(const Scene *scene, RNG &rng, MemoryArena &arena, 
 			result += contrib * weight;
 		}
 
-		//TODO connect to light path
+		//connect to light path
 		for(int i = 0; i<end-1 && i<lightPath.size(); i++){
 			result += ConnectVertices(vertex, lightPath[i], time, scene);
 		}
