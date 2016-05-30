@@ -4,7 +4,7 @@ Camera "perspective" "float fov" [45]
 Film "image" "string filename" ["cornell-pt.exr"]
      "integer xresolution" [400] "integer yresolution" [400]
 
-Sampler "lowdiscrepancy" "integer pixelsamples" [32]
+Sampler "lowdiscrepancy" "integer pixelsamples" [1024]
      
 SurfaceIntegrator "path" 
 

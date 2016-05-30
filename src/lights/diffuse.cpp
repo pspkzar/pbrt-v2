@@ -106,7 +106,7 @@ void DiffuseAreaLight::Pdf_Le(const LightSample &ls, const Vector &wi,
 
     *lPoint = shapeSet->Sample(ls, lNormal);
     *pointPdf = shapeSet->Pdf(*lPoint);
-    if(Dot(wi, *lNormal)) *dirPdf = 0.f;
+    if(Dot(wi, *lNormal) < 0.f) *dirPdf = 0.f;
     else *dirPdf = INV_TWOPI;
 
 }
